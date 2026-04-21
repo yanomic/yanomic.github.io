@@ -4,9 +4,11 @@ title: Payment Capabilities
 slug: payment-capabilities
 date: 2026-04-20T20:32:28+0800
 categories:
-- Payments Capabilities
-tags:
 - Payments
+tags:
+- Payment Capabilities
+- Payment Lifycycle
+- Payment Ecosystem
 ---
 
 ## Introduction
@@ -168,6 +170,85 @@ sequenceDiagram
     Sch->>Iss: Final disposition
 ```
 
+### Tokenization
+
+The lifecycle above focuses on a **one-off** payment path. This section extends that model to **stored-instrument** journeys, where a payment credential is saved first and then referenced in later transactions. This extension is easiest to read as **two connected phases**: 
+    1. **token creation**: provisioning a token for the underlying payment credential, and 
+    2. **subsequent charge**: later authorizations that reference the saved token, often as **merchant-initiated transactions (MIT)** when the payer is not in session. 
+
+In this framing, **tokenization** is the technical replacement of sensitive payment details with a reusable token, with transaction type and indicators signaling whether a charge is **CIT** or **MIT**:
+* **Customer-initiated transactions (CIT)** are started by the cardholder in session; 
+* **Merchant-initiated transactions (MIT)** are submitted by your systems without the cardholder present. 
+
+
+#### Phase 1: Token creation
+
+Phase 1 is a **customer-initiated transaction (CIT)**. Provisioning and consent are handled within the same checkout flow: the cardholder supplies card details, and the **gateway / PSP** calls a **token vault** or **network tokenization** service to create a token bound to that credential. In the same CIT flow, the shopper accepts terms to save the card, completes **SCA** when required, and the authorization carries the needed **stored credential** indicators.
+
+```mermaid
+sequenceDiagram
+    participant Ch as Cardholder
+    participant Mer as Merchant
+    participant G as Gateway / PSP vault
+    participant T as Token / network token service
+    participant Acq as Acquirer
+    participant Sch as Scheme
+    participant Iss as Issuer
+    Note over Ch,Iss: Phase 1 — token creation + initial CIT (CoF setup; often first collection)
+    Ch->>Mer: Pay + agree to save card / subscription terms
+    Mer->>G: Authorization with stored-credential indicators (initial CIT, setup)
+    G->>T: Provision token
+    T->>G: Token id (PAN not stored at merchant)
+    G->>Acq: Auth request with token + CIT + stored-credential (initial/setup) indicators
+    Acq->>Sch: Forward
+    Sch->>Iss: Authorization request
+    alt SCA required
+        Iss->>Ch: Step-up
+        Ch->>Iss: Authenticate
+    end
+    Iss->>Iss: Approve / decline (funds, risk, SCA)
+    Iss->>Sch: Result
+    Sch->>Acq: Result
+    Acq->>G: Result
+    G->>Mer: Approved — token bound; stored-credential agreement for declared MIT use cases
+```
+
+#### Phase 2: Subsequent charge
+
+Phase 2 means **reusing the saved token** for a later charge, without collecting raw payment details again. The same tokenized pattern can be either **MIT** or **CIT**, depending on who initiates the transaction. If your backend triggers the charge while the cardholder is **not in session** (for example, subscription renewal or **unscheduled** top-up), it is a **merchant-initiated transaction (MIT)**. If the cardholder is present and explicitly confirms “pay with saved card,” it is a **customer-initiated transaction (CIT)** using the same saved token. In both cases, acquirer/scheme routing resolves the token to the underlying card for issuer decision.
+
+```mermaid
+sequenceDiagram
+    participant Mer as Merchant
+    participant G as Gateway / PSP vault
+    participant Acq as Acquirer
+    participant Sch as Scheme
+    participant Iss as Issuer
+    Note over Mer,Iss: Phase 2 — subsequent charge (often MIT; categories below)
+    Mer->>G: Charge saved token (MIT category: recurring, UCOF, etc.)
+    G->>Acq: Authorization / capture with token + MIT indicators + link to original agreement
+    Acq->>Sch: Forward
+    Sch->>Iss: Approve / decline (issuer MIT / risk rules)
+    Iss->>Sch: Result
+    Sch->>Acq: Result
+    Acq->>G: Result
+    G->>Mer: Final status
+```
+
+**Local payment methods (LPMs)**
+
+There is no single global “PAN token” story: saved ids are often **mandates**, **billing agreements**, or **vault payment-method** handles. **Phase 1** is commonly a payer-present redirect or app; **Phase 2** exists only where the rail supports **standing mandates** or **billing agreements** for repeat or merchant-initiated collection. Behavior is **method- and country-specific**, not one **stored credential** framework like international cards.
+
+**Subscription, card on file, and unscheduled card on file (Phase 2 / MIT classification)**
+
+These **business patterns** describe how **Phase 2** legs are labeled for schemes; they mostly apply when the merchant **initiates** the charge:
+
+| Term | Meaning |
+|------|--------|
+| **Card on file (CoF)** | Umbrella: the card is **stored** (as a token) for later use. Does not by itself mean subscription. |
+| **Subscription** | **Scheduled** charges (e.g. monthly fee): MIT with a **recurring** indicator; amount may be fixed or variable per your agreement. |
+| **Unscheduled card on file (UCOF)** | Industry label (notably **Mastercard**; Visa uses aligned MIT categories) for **merchant-initiated** charges **without** a fixed schedule—e.g. metered use, top-ups, “charge when balance low.” Still requires valid prior **CIT** agreement from Phase 1. |
+
 **Cards vs. local payment methods**
 
 The same high-level lifecycle stages (initiate, confirm, collect funds, reconcile, handle refunds and problems) exist for local payment methods, but the **shape of participation** differs. **Unlike cards, there is usually no distinct scheme-shaped role** in the picture: local payment methods are more often **bank-led**, **wallet- or platform-led**, **bilateral**, or **one-off integrations**, so **rules, settlement, and problem handling** tend to sit with **banks, local operators, or your PSP**—not with a named global network layer analogous to Visa or Mastercard. **Exceptions** exist where a **national rail or regulated instant-payment system** coordinates participants; treat those as **special cases**, not the default mental model when you add another APM.
@@ -180,6 +261,7 @@ The same high-level lifecycle stages (initiate, confirm, collect funds, reconcil
 | **Settlement and clearing** | Highly standardized batch clearing between banks via the network. | May be instant push, batched bank transfer, or cash-agent settlement; reconciliation fields differ. |
 | **Refunds and disputes** | Chargeback framework is mature and standardized; evidence windows are strict. | Refund support ranges from full to limited or manual; "dispute" may be a support ticket rather than a scheme chargeback. |
 | **Merchant integration** | One mental model (auth/capture/refund) maps across many regions if the PSP abstracts schemes. | More one-off behaviors: expiry of payment codes, offline confirmation, different webhook semantics. |
+| **Saved “token” / instrument id** | **Network** or **PSP token** mapping to PAN. | **Vault payment-method id**, mandate reference, wallet handle—**not** a card PAN token. |
 
 Cards are not universally "better," but they are a **shared rail with predictable roles**. Local payment methods trade that uniformity for local reach, lower cost in some markets, or shopper preference—often at the cost of more asynchronous states and method-specific operational playbooks. Later sections use **payment capabilities** to compare methods on equal footing despite these structural differences.
 
@@ -196,6 +278,7 @@ Typical capabilities and the reliability problem each one addresses:
 - **Cancel / void**: Release an authorization or cancel a still-cancellable payment so **no stray capture** and no ambiguous “half-open” state between order and rail.
 - **Refund**: Return money after a successful collection with traceable linkage to the original payment; reliability depends on partial refunds, cutoffs, and consistent final states.
 - **Status check (query/retrieve)**: Read the **current** state (`pending`, `authorized`, `captured`, `failed`, `canceled`, `refunded`, …) when the UI session, webhooks, or clocks do not give a single synchronous answer—essential whenever phases complete **asynchronously**.
+- 
 
 Comparing payment methods is not only **whether** these capabilities exist, but **how uniformly** they behave: same error shapes, stable transitions, webhook delivery assumptions, and constraints (async completion, expiry, dispute paths). **Local payment methods** often stress **pending** flows, shopper action **outside** the browser, and weaker refund/cancel paths—precisely where capability quality determines whether integrations stay **reliable** or become operational glue code.
 
