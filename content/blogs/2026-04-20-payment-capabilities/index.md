@@ -278,7 +278,9 @@ Typical capabilities and the reliability problem each one addresses:
 - **Cancel / void**: Release an authorization or cancel a still-cancellable payment so **no stray capture** and no ambiguous “half-open” state between order and rail.
 - **Refund**: Return money after a successful collection with traceable linkage to the original payment; reliability depends on partial refunds, cutoffs, and consistent final states.
 - **Status check (query/retrieve)**: Read the **current** state (`pending`, `authorized`, `captured`, `failed`, `canceled`, `refunded`, …) when the UI session, webhooks, or clocks do not give a single synchronous answer—essential whenever phases complete **asynchronously**.
-- 
+- **Tokenize / save payment credential**: Create and store a reusable token (or saved instrument id) without retaining raw credential data; reliability requires clear scope, lifecycle controls, and deterministic token-to-instrument linkage.
+- **Charge with saved token (CIT/MIT)**: Reuse a stored token for subsequent payments, with explicit initiator classification (**customer-initiated** vs **merchant-initiated**) and correct category indicators (for example recurring or unscheduled) to avoid issuer ambiguity.
+- **Stored agreement / mandate lifecycle**: Record, retrieve, update, and revoke shopper consent (or mandate) for repeat charging, so token reuse remains auditable and compliant across renewals, retries, and cancellations.
 
 Comparing payment methods is not only **whether** these capabilities exist, but **how uniformly** they behave: same error shapes, stable transitions, webhook delivery assumptions, and constraints (async completion, expiry, dispute paths). **Local payment methods** often stress **pending** flows, shopper action **outside** the browser, and weaker refund/cancel paths—precisely where capability quality determines whether integrations stay **reliable** or become operational glue code.
 
