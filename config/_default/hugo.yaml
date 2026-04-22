@@ -6,6 +6,8 @@ params:
   description: "Yanomic.com"
   authorName: "Yan Hai"
   copyrightYearStart: 2023
+  # Local `hugo server` — override in config/production for deployed builds
+  analyticsEndpoint: http://localhost:3101/analytics/page-visits
 
 # menu:
   # main:
