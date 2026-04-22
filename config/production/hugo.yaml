@@ -2,4 +2,4 @@
 # Only list keys that differ from _default — no need to copy the whole file.
 
 params:
-  analyticsEndpoint: "http://api.yanomic.com:3101/analytics/page-visits"
+  analyticsEndpoint: "https://api.yanomic.com/analytics/page-visits"
