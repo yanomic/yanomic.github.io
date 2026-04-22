@@ -286,7 +286,10 @@ Comparing payment methods is not only **whether** these capabilities exist, but 
 
 A **standard capability model** helps normalize differences across methods while still respecting each rail’s native behavior, so merchants can keep phases dependable without relearning every edge case per country.
 
-## What's Next
-After complete this blog, also want to explore how can we move from Payment Function to Payment Product, and to Payment Service.
+## What’s Next
+In upcoming posts, we will:
+- Define a complete payment capability map.
+- Compare how leading PSP APIs support each capability.
+- Show how this model evolves from payment functions to payment products and payment services.
 
 
