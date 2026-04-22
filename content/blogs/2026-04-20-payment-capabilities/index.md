@@ -181,7 +181,7 @@ The lifecycle above focuses on a **one-off** payment path. This section extends 
 2. **Subsequent charge** — later authorizations reference that saved token, often without the cardholder present.
 
 
-#### Token Creation
+#### Phase 1: Token Creation
 
 Phase 1 is a **customer-initiated transaction (CIT)**. Provisioning and consent are handled within the same checkout flow: the cardholder supplies card details, and the **gateway / PSP** calls a **token vault** or **network tokenization** service to create a token bound to that credential. In the same CIT flow, the shopper accepts terms to save the card, completes **SCA** when required, and the authorization carries the needed **stored credential** indicators.
 
@@ -212,7 +212,7 @@ sequenceDiagram
     G->>Mer: Approved, token bound, stored-credential agreement for declared MIT use cases
 ```
 
-#### Subsequent Charge
+#### Phase 2: Subsequent Charge
 
 Phase 2 means **reusing the saved token** for a later charge, without collecting raw payment details again. The same tokenized pattern can be either **MIT** or **CIT**, depending on who initiates the transaction. If your backend triggers the charge while the cardholder is **not in session** (for example, subscription renewal or **unscheduled** top-up), it is a **merchant-initiated transaction (MIT)**. If the cardholder is present and explicitly confirms “pay with saved card,” it is a **customer-initiated transaction (CIT)** using the same saved token. In both cases, acquirer/scheme routing resolves the token to the underlying card for issuer decision.
 
@@ -247,7 +247,7 @@ These **business patterns** describe how **Phase 2** legs are labeled for scheme
 
 For local payment methods (LPMs), the **ecosystem and lifecycle are largely the same** as cards: similar participants and the same high-level phases—initiate, confirm, collect funds, reconcile, and handle refunds and problems. The **differences are in the details**—who plays each role, how authorization is triggered, and how refunds and disputes work. 
 
-### At a Glance
+### Ecosystem and Lifecycle at a Glance
 
 At a high level, LPMs replace cards' **single global scheme layer** with **national or regional operators**—e.g. PIX (BCB, Brazil), UPI (NPCI, India), SEPA CT / SDD (EPC), iDEAL (Currence / EPI), BLIK (Poland), Swish, Bizum, FPS, PayNow, PromptPay—each with its own rules, settlement, and dispute framework. Some LPMs are genuinely **bank-led**, **wallet- or platform-led**, or **bilateral**, with no scheme analog at all. As a result, you cannot assume one global rulebook the way you can with Visa or Mastercard, and the issuer/acquirer duality often collapses into a single bank role.
 
