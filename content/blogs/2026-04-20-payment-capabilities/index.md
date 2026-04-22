@@ -7,7 +7,7 @@ categories:
 - Payments
 tags:
 - Payment Capabilities
-- Payment Lifycycle
+- Payment Lifecycle
 - Payment Ecosystem
 ---
 
@@ -17,14 +17,11 @@ Not every payment method behaves the same way. The difference between cards and 
 
 For both merchants and shoppers, this creates real friction. Merchants want to accept payments reliably, and shoppers want to pay with their preferred method, but both sides are often forced to navigate inconsistent capabilities, edge cases, and operational trade-offs. They should not have to become payments experts just to complete a simple transaction.
 
-In this blog, we outline the key capabilities offered by different payment methods and discuss the practical advantages and disadvantages for both merchants and shoppers.
+In this blog series, we focus on merchant-facing APIs and describe capabilities from a functional perspective. We do not go deep into implementation details, which vary across providers; instead, we concentrate on the observable inputs, outputs, and behavior of each payment "black box."
 
-We focus on merchant-facing APIs and describe capabilities from a functional perspective. We do not go deep into implementation details, which vary across providers; instead, we concentrate on the observable inputs, outputs, and behavior of each payment "black box."
+We also compare payment methods / payment service providers against a standard set of capabilities that can reduce experience differences across methods, and discuss how method-specific characteristics can be bridged into a more standardized integration model.
 
-We will also compare payment methods against a standard set of capabilities that can best reduce experience differences across methods, and discuss how to bridge method-specific characteristics into a more standardized integration model.
-
-
-## Payment Ecosystem and Lifecycle
+## Ecosystem and Lifecycle
 
 Card payments are a useful reference because the roles are well defined and the same lifecycle vocabulary (authorize, capture, refund, dispute) appears across many integrations. The ecosystem is not just "shopper and merchant"; several specialized parties cooperate, each with a narrow responsibility.
 
@@ -35,56 +32,63 @@ Card payments are a useful reference because the roles are well defined and the 
 - **Acquirer** (merchant bank): Underwrites the merchant, routes authorization and capture messages, receives settlement from the card network, and credits the merchant (minus fees). 
 - **Scheme** (Card network): Visa, Mastercard, and others. Sets rules, routes messages between acquirer and issuer, and operates clearing and often parts of dispute handling. Networks do not hold the cardholder's money; they coordinate messaging and settlement between banks.
 - **Issuer** (cardholder bank): Issues the card, approves or declines authorization based on risk and available funds, posts charges to the cardholder, and participates in clearing, settlement, and disputes on the cardholder side.
-- **Gateway / PSP** (optional but common): Aggregates many merchants, offers a single API, tokenization, fraud tools, and connectivity to one or more acquirers. From the merchant's perspective, the gateway is often the primary integration surface even though settlement still runs through acquirer–network–issuer rails.
+- **Gateway / PSP** (optional but common): Aggregates many merchants, offers a single API, tokenization, fraud tools, and connectivity to one or more acquirers. From the merchant's perspective, the gateway is often the primary integration surface even though settlement still runs through acquirer–network–issuer rails. In modern integrations the gateway and PSP are often the same product (e.g. Stripe, Adyen, Checkout.com), so for brevity we treat them as one role throughout.
 
-**How they interact across lifecycle phases**
+With the parties in place, the same transaction flows through a sequence of well-defined phases. The sections below walk through each one in order.
 
-1. **Onboarding (before checkout)**  
-   The merchant (optionally via PSP) **onboards** with an acquirer: KYC, pricing, merchant category (**MCC**), and technical connectivity. The acquirer **underwrites** the merchant **against** scheme rules—PCI, branding, permitted category use, and cardholder-data handling. In the usual path the **acquirer** validates and approves the application (a **PSP** may handle operations in front of the acquirer). **Direct scheme approval** is the exception: some programs, **high-risk** categories, or **network registration** require the acquirer to file with the scheme, which then accepts or declines. The cardholder is not involved; onboarding only **establishes** what the merchant **may** initiate later at checkout.
+### Onboarding
+The merchant (optionally via PSP) onboards with an acquirer: KYC, pricing, MCC, and technical connectivity. The acquirer underwrites the merchant against **scheme rules** — PCI, branding, permitted category use, and cardholder-data handling. In the usual path the **acquirer** validates and approves the application (a **PSP** may handle operations in front of the acquirer). Direct scheme approval is the exception: some programs, high-risk categories, or network registration require the acquirer to file with the scheme, which then accepts or declines. **The cardholder is not involved**; onboarding only establishes what the merchant may initiate later at checkout.
 
 ```mermaid
 sequenceDiagram
     participant Mer as Merchant / PSP
     participant Acq as Acquirer
     participant Sch as Scheme
-    Note over Sch,Acq: Scheme sets rules; acquirer must enforce them on sponsored merchants.
+    Note over Sch,Acq: Scheme sets rules, and the acquirer must enforce them on sponsored merchants.
     Mer->>Acq: Apply (KYC, business model, MCC, channels, volumes)
     Acq->>Acq: Underwriting, PCI / data review vs scheme requirements
     opt Registration or scheme review required
         Acq->>Sch: Merchant or program registration
         Sch->>Acq: Approve / decline
     end
-    Acq->>Mer: MID, pricing, technical connectivity — cleared to accept the brand
+    Acq->>Mer: MID, pricing, technical connectivity, cleared to accept the brand
 ```
 
-2. **Authorization** (checkout initiation, SCA, hold — no merchant funding yet)  
-   This is a single card authorization from the merchant's checkout through to issuer decision. **Payment initiation** is the merchant **starting** that flow: assemble amount, currency, merchant identifiers, and card details, and send the **authorization request** through the gateway and acquirer toward the issuer. **During** that authorization, the **issuer** may need to **authenticate the cardholder first** (strong customer authentication / SCA—e.g. 3-D Secure, bank app, OTP) before approving. The outcome is typically structured data (e.g. CAVV, ECI) the issuer uses with funds and risk checks to **approve or decline** the transaction. If approved, the issuer places an **authorization hold**. A hold confirms availability and (when SCA ran) payer intent; it still does **not** pay the merchant. Funding follows **capture** and **settlement**. 
+### Authorization
+Payment initiation is the merchant starting an authorization: assemble amount, currency, merchant identifiers, and card details, and send the **authorization request** through the gateway and acquirer toward the issuer. During that authorization, the issuer may need to **authenticate** the cardholder first (strong customer authentication / SCA—e.g. 3-D Secure, bank app, OTP) before approving. The outcome is typically structured data (e.g. CAVV, ECI) the issuer uses with funds and risk checks to **approve or decline** the transaction. If approved, the issuer places an **authorization hold**. A hold confirms availability and (when SCA ran) payer intent; it still does **not** pay the merchant. Funding follows **capture** and **settlement**.
 
 ```mermaid
 sequenceDiagram
     participant Mer as Merchant
+    participant DS as 3DS Server / Directory
+    participant ACS as Issuer ACS
+    participant Ch as Cardholder
     participant G as Gateway / PSP
     participant Acq as Acquirer
     participant Sch as Scheme
     participant Iss as Issuer
-    participant Ch as Cardholder
-    Mer->>G: Authorization request (amount, merchant id, tokenized PAN, …)
+    opt Strong customer authentication (e.g. 3-D Secure 2)
+        Mer->>DS: Authentication request (device data, amount, PAN)
+        DS->>ACS: Route to issuer ACS
+        alt Challenge required
+            ACS->>Ch: Step-up challenge
+            Ch->>ACS: Authenticate
+        end
+        ACS->>Mer: Authentication result (CAVV / ECI)
+    end
+    Mer->>G: Authorization request (amount, merchant id, tokenized PAN, CAVV / ECI)
     G->>Acq: Forward auth
     Acq->>Sch: Auth request
     Sch->>Iss: Auth request
-    alt Strong customer authentication (e.g. 3-D Secure)
-        Iss->>Ch: Step-up challenge
-        Ch->>Iss: Authentication result (e.g. for CAVV / ECI)
-    end
     Iss->>Iss: Decide using funds, risk, and SCA evidence
-    Iss->>Sch: Approve or decline; hold if approved
+    Iss->>Sch: Approve or decline, hold if approved
     Sch->>Acq: Result
     Acq->>G: Result
     G->>Mer: Authorized or declined
 ```
 
-3. **Capture** (presentment / clearing)
-   The merchant (or automated rules) sends **capture** instructions for all or part of the authorized amount. The acquirer **presents** those transactions into clearing: the scheme exchanges clearing records with the issuer so the charge can be posted to the cardholder. Capture is about **what** is owed and **moving the transaction into clearing**; it is still distinct from **settlement**, where money actually moves between banks.
+### Capture
+The merchant (or automated rules) sends **capture** instructions for all or part of the authorized amount. The acquirer **presents** those transactions into clearing: the scheme exchanges clearing records with the issuer so the charge can be posted to the cardholder. Capture is about what is owed and **moving the transaction into clearing**; it is still distinct from **settlement**, where money actually moves between banks.
 
 ```mermaid
 sequenceDiagram
@@ -98,8 +102,8 @@ sequenceDiagram
     Iss->>Iss: Post charge to cardholder
 ```
 
-4. **Settlement** (funds movement)
-   After clearing, **interbank settlement** nets obligations between issuer and acquirer according to the scheme's arrangements. Separately, the **acquirer settles to the merchant**: payout timing, reserves, and fees are defined in the merchant's contract. The scheme orchestrates settlement between **members** (issuer ↔ acquirer); it does not replace the acquirer's **merchant** payout.
+### Settlement
+After clearing, **interbank settlement** nets obligations between issuer and acquirer according to the scheme's arrangements. Separately, the **acquirer settles to the merchant**: payout timing, reserves, and fees are defined in the merchant's contract. The scheme orchestrates settlement between issuer and acquirer; it does not replace the acquirer's merchant payout.
 
 ```mermaid
 sequenceDiagram
@@ -113,8 +117,8 @@ sequenceDiagram
     Acq->>Mer: Merchant payout per contract
 ```
 
-5. **Cancel / Void** (before capture)
-   If the merchant will not capture—order canceled, inventory unavailable, or duplicate auth—they **void** or **cancel** the authorization while it is still valid. The acquirer asks the issuer to **release the hold**; no capture means no clearing/settlement for that authorization. Naming varies by provider (`void`, `cancel`, `reverse authorization`); the idea is the same: end the hold without taking money.
+### Cancel / Void
+If the merchant will not capture — order canceled, inventory unavailable, or duplicate auth — they **void** or **cancel** the authorization while it is still valid. The acquirer asks the issuer to **release the hold**; no capture means no clearing/settlement for that authorization. Naming varies by provider (`void`, `cancel`, `reverse authorization`); the idea is the same: end the hold without taking money.
 
 ```mermaid
 sequenceDiagram
@@ -135,8 +139,8 @@ sequenceDiagram
     G->>Mer: Final status
 ```
 
-6. **Refund** (after capture; merchant-initiated)
-   Refunds return money to the cardholder after a successful capture. They are initiated on the **merchant/acquirer** side and ride the card rails as a **credit**; timing, partial refunds, and cutoffs depend on network and issuer rules.
+### Refund
+Refunds return money to the cardholder after a successful capture. They are initiated on the **merchant/acquirer** side and ride the card rails as a **credit**; timing, partial refunds, and cutoffs depend on network and issuer rules.
 
 ```mermaid
 sequenceDiagram
@@ -151,8 +155,8 @@ sequenceDiagram
     Iss->>Ch: Cardholder sees credit
 ```
 
-7. **Dispute / chargeback** (shopper-initiated; scheme-governed)
-   **Disputes** are not the same as refunds: the cardholder challenges the charge with the **issuer**. The issuer opens a **chargeback** (or similar) case; the acquirer and merchant exchange evidence under **scheme** rules and timelines. Outcomes can reverse or adjust what was settled—so "payment succeeded" in an API is not always the end of **operational risk**.
+### Dispute / Chargeback
+Unlike refunds, **disputes** start when the **cardholder** challenges the charge with the **issuer**. The issuer opens a **chargeback** (or similar) case, and the acquirer and merchant exchange evidence under **scheme** rules and timelines. Outcomes can reverse or adjust what was settled—so "payment succeeded" in an API is not always the end of **operational risk**.
 
 ```mermaid
 sequenceDiagram
@@ -171,17 +175,13 @@ sequenceDiagram
 ```
 
 ### Tokenization
-
 The lifecycle above focuses on a **one-off** payment path. This section extends that model to **stored-instrument** journeys, where a payment credential is saved first and then referenced in later transactions. This extension is easiest to read as **two connected phases**: 
-    1. **token creation**: provisioning a token for the underlying payment credential, and 
-    2. **subsequent charge**: later authorizations that reference the saved token, often as **merchant-initiated transactions (MIT)** when the payer is not in session. 
 
-In this framing, **tokenization** is the technical replacement of sensitive payment details with a reusable token, with transaction type and indicators signaling whether a charge is **CIT** or **MIT**:
-* **Customer-initiated transactions (CIT)** are started by the cardholder in session; 
-* **Merchant-initiated transactions (MIT)** are submitted by your systems without the cardholder present. 
+1. **Token creation** — in an in-session checkout, the PSP provisions a reusable token bound to the underlying payment credential.
+2. **Subsequent charge** — later authorizations reference that saved token, often without the cardholder present.
 
 
-#### Phase 1: Token creation
+#### Token Creation
 
 Phase 1 is a **customer-initiated transaction (CIT)**. Provisioning and consent are handled within the same checkout flow: the cardholder supplies card details, and the **gateway / PSP** calls a **token vault** or **network tokenization** service to create a token bound to that credential. In the same CIT flow, the shopper accepts terms to save the card, completes **SCA** when required, and the authorization carries the needed **stored credential** indicators.
 
@@ -194,7 +194,6 @@ sequenceDiagram
     participant Acq as Acquirer
     participant Sch as Scheme
     participant Iss as Issuer
-    Note over Ch,Iss: Phase 1 — token creation + initial CIT (CoF setup; often first collection)
     Ch->>Mer: Pay + agree to save card / subscription terms
     Mer->>G: Authorization with stored-credential indicators (initial CIT, setup)
     G->>T: Provision token
@@ -210,10 +209,10 @@ sequenceDiagram
     Iss->>Sch: Result
     Sch->>Acq: Result
     Acq->>G: Result
-    G->>Mer: Approved — token bound; stored-credential agreement for declared MIT use cases
+    G->>Mer: Approved, token bound, stored-credential agreement for declared MIT use cases
 ```
 
-#### Phase 2: Subsequent charge
+#### Subsequent Charge
 
 Phase 2 means **reusing the saved token** for a later charge, without collecting raw payment details again. The same tokenized pattern can be either **MIT** or **CIT**, depending on who initiates the transaction. If your backend triggers the charge while the cardholder is **not in session** (for example, subscription renewal or **unscheduled** top-up), it is a **merchant-initiated transaction (MIT)**. If the cardholder is present and explicitly confirms “pay with saved card,” it is a **customer-initiated transaction (CIT)** using the same saved token. In both cases, acquirer/scheme routing resolves the token to the underlying card for issuer decision.
 
@@ -224,7 +223,6 @@ sequenceDiagram
     participant Acq as Acquirer
     participant Sch as Scheme
     participant Iss as Issuer
-    Note over Mer,Iss: Phase 2 — subsequent charge (often MIT; categories below)
     Mer->>G: Charge saved token (MIT category: recurring, UCOF, etc.)
     G->>Acq: Authorization / capture with token + MIT indicators + link to original agreement
     Acq->>Sch: Forward
@@ -235,11 +233,7 @@ sequenceDiagram
     G->>Mer: Final status
 ```
 
-**Local payment methods (LPMs)**
-
-There is no single global “PAN token” story: saved ids are often **mandates**, **billing agreements**, or **vault payment-method** handles. **Phase 1** is commonly a payer-present redirect or app; **Phase 2** exists only where the rail supports **standing mandates** or **billing agreements** for repeat or merchant-initiated collection. Behavior is **method- and country-specific**, not one **stored credential** framework like international cards.
-
-**Subscription, card on file, and unscheduled card on file (Phase 2 / MIT classification)**
+#### MIT Classification
 
 These **business patterns** describe how **Phase 2** legs are labeled for schemes; they mostly apply when the merchant **initiates** the charge:
 
@@ -247,11 +241,21 @@ These **business patterns** describe how **Phase 2** legs are labeled for scheme
 |------|--------|
 | **Card on file (CoF)** | Umbrella: the card is **stored** (as a token) for later use. Does not by itself mean subscription. |
 | **Subscription** | **Scheduled** charges (e.g. monthly fee): MIT with a **recurring** indicator; amount may be fixed or variable per your agreement. |
-| **Unscheduled card on file (UCOF)** | Industry label (notably **Mastercard**; Visa uses aligned MIT categories) for **merchant-initiated** charges **without** a fixed schedule—e.g. metered use, top-ups, “charge when balance low.” Still requires valid prior **CIT** agreement from Phase 1. |
+| **Unscheduled card on file (UCOF)** | Industry label for **merchant-initiated** charges **without** a fixed schedule—e.g. metered use, top-ups, “charge when balance low.” Mastercard uses “UCOF”; Visa’s aligned category is “Unscheduled Credential on File” (same acronym). Still requires valid prior **CIT** agreement from Phase 1. |
 
-**Cards vs. local payment methods**
+## Local Payment Methods
 
-The same high-level lifecycle stages (initiate, confirm, collect funds, reconcile, handle refunds and problems) exist for local payment methods, but the **shape of participation** differs. **Unlike cards, there is usually no distinct scheme-shaped role** in the picture: local payment methods are more often **bank-led**, **wallet- or platform-led**, **bilateral**, or **one-off integrations**, so **rules, settlement, and problem handling** tend to sit with **banks, local operators, or your PSP**—not with a named global network layer analogous to Visa or Mastercard. **Exceptions** exist where a **national rail or regulated instant-payment system** coordinates participants; treat those as **special cases**, not the default mental model when you add another APM.
+For local payment methods (LPMs), the **ecosystem and lifecycle are largely the same** as cards: similar participants and the same high-level phases—initiate, confirm, collect funds, reconcile, and handle refunds and problems. The **differences are in the details**—who plays each role, how authorization is triggered, and how refunds and disputes work. 
+
+### At a Glance
+
+At a high level, LPMs replace cards' **single global scheme layer** with **national or regional operators**—e.g. PIX (BCB, Brazil), UPI (NPCI, India), SEPA CT / SDD (EPC), iDEAL (Currence / EPI), BLIK (Poland), Swish, Bizum, FPS, PayNow, PromptPay—each with its own rules, settlement, and dispute framework. Some LPMs are genuinely **bank-led**, **wallet- or platform-led**, or **bilateral**, with no scheme analog at all. As a result, you cannot assume one global rulebook the way you can with Visa or Mastercard, and the issuer/acquirer duality often collapses into a single bank role.
+
+The lifecycle shape shifts accordingly: **authorization is frequently push-based** (shopper-pushed from their bank or app) rather than pull-based, and **refund/dispute frameworks are usually weaker** than the card chargeback system. Stored-instrument flows also look different—there is no global "PAN token" equivalent, so **Phase 2** (reusing a saved instrument) only exists where the rail supports **standing mandates** or **billing agreements** for repeat or merchant-initiated collection, and behavior stays **method- and country-specific** rather than a single stored-credential framework.
+
+### Summary of Differences
+
+The table below consolidates the card baseline and typical LPM behavior across the aspects touched on above:
 
 | Aspect | Card ecosystem | Typical local / APM behavior |
 |--------|----------------|------------------------------|
@@ -263,13 +267,13 @@ The same high-level lifecycle stages (initiate, confirm, collect funds, reconcil
 | **Merchant integration** | One mental model (auth/capture/refund) maps across many regions if the PSP abstracts schemes. | More one-off behaviors: expiry of payment codes, offline confirmation, different webhook semantics. |
 | **Saved “token” / instrument id** | **Network** or **PSP token** mapping to PAN. | **Vault payment-method id**, mandate reference, wallet handle—**not** a card PAN token. |
 
-Cards are not universally "better," but they are a **shared rail with predictable roles**. Local payment methods trade that uniformity for local reach, lower cost in some markets, or shopper preference—often at the cost of more asynchronous states and method-specific operational playbooks. Later sections use **payment capabilities** to compare methods on equal footing despite these structural differences.
+Cards are not universally "better"; they are a **shared rail with predictable roles**. LPMs trade that uniformity for **local reach, lower cost in some markets, or shopper preference**—at the cost of more asynchronous states and method-specific operational playbooks. The next section introduces payment capabilities as the common lens for comparing methods despite these differences.
 
-## What are Payment Capabilities
+## Payment Capabilities
 
-The **Payment Ecosystem and Lifecycle** section above describes **who** is involved and **what happens** in order from onboarding through disputes. **Payment capabilities** are the complementary lens: the **operations and signals** exposed through merchant-facing APIs so that **each phase can be driven and observed reliably**—automation, reconciliation, and support do not depend on guesswork or manual follow-up.
+The **Ecosystem and Lifecycle** section above describes *who* is involved and *what happens* from onboarding through disputes. **Payment capabilities** are the complementary lens: the operations and signals merchant-facing APIs expose so each phase can be driven and observed reliably, without guesswork or manual follow-up.
 
-**Reliability** in this sense means predictable **semantics** (what a call does and does not do), a usable **state model** (statuses and allowed transitions), **recovery** (idempotency, safe retries, clear errors), **time discipline** (expiry, capture windows, settlement latency), and **observability** (queries and/or webhooks that reflect reality soon enough for operations). Capabilities are how a method makes those guarantees—or where it leaves gaps.
+Reliability here means predictable **semantics** (what a call does and does not do), a usable **state model** (statuses and allowed transitions), **recovery** (idempotency, safe retries, clear errors), **time discipline** (expiry, capture windows, settlement latency), and **observability** (queries or webhooks that reflect reality soon enough for operations). Comparing methods is not just whether capabilities exist, but how consistently they behave across error shapes, transitions, and asynchronous constraints. This is especially where LPMs stress integrations (pending flows, shopper action outside the browser, weaker refund/cancel paths), and why a **standard capability model** helps compare rails on equal footing while preserving method-specific behavior.
 
 Typical capabilities and the reliability problem each one addresses:
 
@@ -282,14 +286,8 @@ Typical capabilities and the reliability problem each one addresses:
 - **Charge with saved token (CIT/MIT)**: Reuse a stored token for subsequent payments, with explicit initiator classification (**customer-initiated** vs **merchant-initiated**) and correct category indicators (for example recurring or unscheduled) to avoid issuer ambiguity.
 - **Stored agreement / mandate lifecycle**: Record, retrieve, update, and revoke shopper consent (or mandate) for repeat charging, so token reuse remains auditable and compliant across renewals, retries, and cancellations.
 
-Comparing payment methods is not only **whether** these capabilities exist, but **how uniformly** they behave: same error shapes, stable transitions, webhook delivery assumptions, and constraints (async completion, expiry, dispute paths). **Local payment methods** often stress **pending** flows, shopper action **outside** the browser, and weaker refund/cancel paths—precisely where capability quality determines whether integrations stay **reliable** or become operational glue code.
-
-A **standard capability model** helps normalize differences across methods while still respecting each rail’s native behavior, so merchants can keep phases dependable without relearning every edge case per country.
-
 ## What’s Next
-In upcoming posts, we will:
-- Define a complete payment capability map.
+In upcoming blogs, we will:
+- Define a complete payment capabilities map.
 - Compare how leading PSP APIs support each capability.
 - Show how this model evolves from payment functions to payment products and payment services.
-
-
