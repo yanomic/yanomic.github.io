@@ -11,7 +11,7 @@ tags:
 
 ## Introduction
 
-In the [previous blog]({{< ref "2026-04-20-payment-capabilities" >}}) we walked through the payment ecosystem and lifecycle, and introduced **payment capabilities** as the merchant-facing operations and signals that make each phase reliable and observable. 
+In the [previous blog]({{< ref "2026-04-20-payment-capabilities" >}}) we walked through the payment ecosystem and lifecycle, and introduced **payment capabilities** as the merchant-facing operations and signals that make each phase reliable and observable.
 
 We closed with a short list — authorize, capture, cancel, refund, status check, tokenize, charge with saved token, and mandate lifecycle. This blog enumerates the capabilities across the **entire lifecycle** and describes each one through a consistent five-lens framework.
 
@@ -22,7 +22,7 @@ Each capability is described from the same five angles. The frame is worth spell
 - **Semantics** — what the capability does and does not do. The input/output contract, and the single question it answers.
 - **State model** — the statuses it produces or transitions, and the allowed transitions between them. Which states are terminal, which are asynchronous, and where the next step lives.
 - **Recovery** — how to stay correct under retries, timeouts, partial failures, duplicate webhooks, and out-of-order events. Idempotency anchors, reconciliation primitives, and safe fallbacks.
-- **Time discipline** — the clocks and windows that govern the capability: review SLAs, expirations, capture windows, representation deadlines, settlement lags.
+- **Time discipline** — the clocks and windows that govern the capability: review SLAs, expirations, capture windows, representment deadlines, settlement lags.
 - **Observability** — how the merchant learns the current state and the history behind it: synchronous responses, status queries, webhooks, reports, and reconciliation files.
 
 
@@ -32,11 +32,11 @@ Onboarding establishes **who the merchant is**, **what they are allowed to accep
 
 For cards, onboarding is anchored by **scheme rules**: PCI, branding, MCC (Merchant Category Code), permitted products, and cardholder-data handling are all defined at the network level, and the acquirer enforces them on sponsored merchants. For **LPMs** there is no single scheme analog. Requirements differ by **bank**, **wallet operator**, or **platform**, and even the same rail can vary by country or tier.
 
-The information the merchant must supply ranges from **structured legal documents** (incorporation certificate, ownership, directors' IDs, licenses, bank statements, processing history) to **free-text business descriptions** (what you sell, how you fulfill, refund policy, risk controls). 
+The information the merchant must supply ranges from **structured legal documents** (incorporation certificate, ownership, directors' IDs, licenses, bank statements, processing history) to **free-text business descriptions** (what you sell, how you fulfill, refund policy, risk controls).
 
 Automation is uneven. Card acquirers typically expose an **onboarding API** or at least a structured partner portal for submission. For many LPMs, the practical channel is still **email threads** or **shared Google Docs / spreadsheets**, with a human on the other end requesting clarifications. Even where an API exists, the review itself is not synchronous — the acquirer or bank takes time to underwrite, and outcomes span **approve**, **approve with conditions / partial approval**, **need additional documents**, and **reject**. Merchants must not assume the API response is the final word, and must instead rely on a status channel: a query endpoint, a webhook, or both.
 
-A successful onboarding typically yields a **MID** (Merchant IDentifier):
+A successful onboarding typically yields a **MID** (Merchant ID):
 - Card onboarding often produces a **hierarchy** of identifiers — one or more MIDs (per scheme, per currency, per legal entity), with **store IDs** and **terminal IDs (TID)** beneath them.
 - For marketplaces and platforms, additional **sub-merchant** or **payfac sub-account** identifiers sit under the platform's master MID.
 - LPMs use their own terminology — **partner ID**, **merchant code**, **app ID**, **handle**, **VPA** — and there is no universal equivalent of a MID.
@@ -48,57 +48,58 @@ Onboarding also rarely ends at the identifier. Follow-up steps establish the **c
 
 The application and the resulting MID share a single lifecycle. The states worth modeling explicitly:
 
-- **`submitted`** — application has been filed; not yet picked up for review.
-- **`under_review`** — the acquirer / PSP underwriting team is actively assessing the application.
-- **`info_requested`** — the reviewer has asked for additional documents or clarifications; the ball is in the merchant's court. Returns to `under_review` once the merchant responds.
-- **`approved`** — underwriting passed for the full requested scope (brands, MCCs, currencies, geographies). Not yet transactable until connectivity is configured.
-- **`partially_approved`** — underwriting passed for a strict subset of the requested scope. The application is not rejected, but later transactions outside the approved scope will be declined. **This is the state most integrations forget to model**, and the missing scope surfaces downstream as unexplained declines.
-- **`rejected`** — underwriting refused; no MID is produced. Terminal for this application — to retry, the merchant must file a new one.
-- **`active`** — MID is provisioned, communication channels (keys, SFTP, webhooks, IPs) are established, and the merchant can submit transactions.
-- **`suspended`** — a previously active MID has been paused: voluntarily, by dormancy policy, or due to risk / compliance review. No new authorizations are accepted; in-flight obligations (settlement, disputes, refunds) continue.
-- **`terminated`** — MID is permanently closed. Settlement of in-flight items continues but no new transactions can be initiated. Effectively final.
+- **`Submitted`** — application has been filed; not yet picked up for review.
+- **`UnderReview`** — the acquirer / PSP underwriting team is actively assessing the application.
+- **`InfoRequested`** — the reviewer has asked for additional documents or clarifications; the ball is in the merchant's court. Returns to `UnderReview` once the merchant responds.
+- **`Approved`** — underwriting passed for the full requested scope (brands, MCCs, currencies, geographies). Not yet transactable until connectivity is configured.
+- **`PartiallyApproved`** — underwriting passed for a strict subset of the requested scope. The application is not rejected, but later transactions outside the approved scope will be declined. **This is the state most integrations forget to model**, and the missing scope surfaces downstream as unexplained declines.
+- **`Rejected`** — underwriting refused; no MID is produced. Terminal for this application — to retry, the merchant must file a new one.
+- **`Active`** — MID is provisioned, communication channels (keys, SFTP, webhooks, IPs) are established, and the merchant can submit transactions.
+- **`Suspended`** — a previously active MID has been paused: voluntarily, by dormancy policy, or due to risk / compliance review. No new authorizations are accepted; in-flight obligations (settlement, disputes, refunds) continue.
+- **`Terminated`** — MID is permanently closed. Settlement of in-flight items continues but no new transactions can be initiated. Effectively final.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> submitted: application filed
-    submitted --> under_review: review starts
-    under_review --> info_requested: reviewer needs more
-    info_requested --> under_review: merchant responds
-    under_review --> approved
-    under_review --> partially_approved
-    under_review --> rejected
-    approved --> active: connectivity established
-    partially_approved --> active: connectivity established
-    active --> suspended: paused (risk / dormancy / merchant)
-    suspended --> active: resumed
-    suspended --> terminated
-    active --> terminated
-    rejected --> [*]
-    terminated --> [*]
+    [*] --> Submitted: application filed
+    Submitted --> UnderReview: review starts
+    UnderReview --> InfoRequested: reviewer needs more
+    InfoRequested --> UnderReview: merchant responds
+    UnderReview --> Approved
+    UnderReview --> PartiallyApproved
+    UnderReview --> Rejected
+    Approved --> Active: connectivity established
+    PartiallyApproved --> Active: connectivity established
+    Active --> Suspended: paused (risk / dormancy / merchant)
+    Suspended --> Active: resumed
+    Suspended --> Terminated
+    Active --> Terminated
+    Rejected --> [*]
+    Terminated --> [*]
 ```
 
 **The five lenses**
 - **Semantics** — answer one question: *"May this merchant submit transactions of type X, in country Y, on rail Z, from date D?"* Output is a credentialed identity, a scope (brands, MCCs, currencies, volumes, entity), and the channels through which subsequent capabilities will be invoked.
-- **State model** — the state machine above is the source of truth. `partially_approved` is the trap most integrations miss; `info_requested` is the only non-terminal state where the *merchant* holds the next action; `rejected` and `terminated` are final.
+- **State model** — the state machine above is the source of truth. `PartiallyApproved` is the trap most integrations miss; `InfoRequested` is the only non-terminal state where the *merchant* holds the next action; `Rejected` and `Terminated` are final.
 - **Recovery** — the merchant-side retry loop is **resubmitting a specific artifact**, not re-running the application. Well-designed onboarding APIs anchor on an **application ID** (idempotent updates), expose **per-artifact upload endpoints**, and return **structured rejection reasons** ("license document unreadable", "MCC not permitted") so follow-up can be automated instead of email-threaded.
-- **Time discipline** — review SLAs are bounded for cards at PSPs that publish one (hours to a few days) and mostly unbounded for manually handled LPMs. **Document validity** windows apply (e.g. bank statement within 90 days), so long-paused applications force re-collection. Some scheme programs require **annual re-registration**. 
-- **Observability** — two modes, both required: a **status query** on the application/MID as the source of truth, and **status webhooks** for transitions (`info_requested`, `approved`, `partially_approved`, `suspended`). Long-term observability also needs a **merchant profile read API** — what MIDs do I have, under which entity, which brands, which caps — because staleness here causes unexplained declines downstream.
+- **Time discipline** — review SLAs are bounded for cards at PSPs that publish one (hours to a few days) and mostly unbounded for manually handled LPMs. **Document validity** windows apply (e.g. bank statement within 90 days), so long-paused applications force re-collection. Some scheme programs require **annual re-registration**.
+- **Observability** — two modes, both required: a **status query** on the application/MID as the source of truth, and **status webhooks** for transitions (`InfoRequested`, `Approved`, `PartiallyApproved`, `Suspended`). Long-term observability also needs a **merchant profile read API** — what MIDs do I have, under which entity, which brands, which caps — because staleness here causes unexplained declines downstream.
 
 
 ## Authorize
 
 Authorization is the most consequential capability in the lifecycle. It **marks the start of a payment**, and it is where the most parties interact: shopper, merchant, PSP, acquirer, scheme or rail operator, issuer, and — on many LPMs — a wallet or platform sitting alongside the bank. Every substantive check happens inside this one call: **risk scoring**, **authentication of the payer**, **fraud screening**, **funds / balance check**, **velocity and regulatory limits**, **sanctions / AML**. A payment is only authorized once all of these pass.
 
-**Cards vs alternative methods split at the end of this step.** For cards, authorization reserves funds but does **not** move them; a separate **capture** is required to push the transaction into clearing. For most LPMs, the split does not exist: authorization and capture happen **together** in a single shopper action — when the bank confirms the push, the money is already on its way, and there is no second capture instruction to send. The capture capability from the next section is effectively a no-op on those rails.
+**Cards vs alternative methods split at the end of this step.** For cards, authorization reserves funds but does **not** move them; a separate **capture** is required to push the transaction into clearing. For most LPMs, the split does not exist: authorization and capture happen **together** in a single shopper action — when the rail confirms the transfer, the money is already on its way, and there is no second capture instruction to send. The capture capability from the next section is effectively a no-op on those rails. **Vouchers and offline-confirmation LPMs are the exception**: like cards, they are two-step — the rail issues a reference at authorization time, and the actual payment confirmation arrives later (sometimes days later) when the shopper completes the payment off-rail.
 
 ### Card authorization flows
 
-On cards, two shapes dominate:
+On cards, three shapes dominate:
 
 - **Challenge flow** — the issuer requires an explicit interaction from the shopper to authenticate. The shopper is taken (inline iframe or full redirect) to the issuer's 3-D Secure ACS page and completes a challenge: OTP, bank-app push, biometric confirmation inside the banking app, or password. When the challenge finishes, the browser returns to the merchant and the merchant finalizes authorization with the authentication evidence (CAVV/ECI) attached.
 - **Frictionless flow** — the issuer authenticates the shopper from device, transaction, and behavioral data alone and authorizes without any shopper interaction. 3-D Secure still runs (authentication evidence is still produced), but the challenge step is skipped and the merchant never leaves its own surface.
+- **Non-3DS / SCA-exempt** — issuer authorises directly from the auth message; common in markets without an SCA mandate, for low-value or merchant-initiated transactions, and under regulator-approved exemptions (TRA, low-value, allowlist).
 
-Either way, the merchant gets a **synchronous, final authorization outcome** once any challenge completes — `authorised`, `declined`, or technical `error`, with no fourth bucket called *"we'll let you know in a few minutes."*  The whole chain runs on tight, scheme-enforced clocks: the issuer answers the auth message in seconds (and if it doesn't, the scheme returns a **stand-in** decision in its place), and the 3-D Secure challenge itself is bounded to a few minutes by the ACS. The only pending-shaped edge cases are recovery scenarios — the shopper's browser doesn't return cleanly from the ACS, or the merchant times out mid-call — and even those resolve within minutes via **status query** or **auth reversal**, not a multi-hour wait.
+Either way, the merchant gets a **synchronous, final authorization outcome** once any authentication and the auth message complete — `authorised`, `declined`, or technical `error`, with no fourth bucket called *"we'll let you know in a few minutes."* The whole chain runs on tight, scheme-enforced clocks: the issuer answers the auth message in seconds (and if it doesn't, the scheme returns a **stand-in** decision in its place), and the 3-D Secure challenge itself is bounded to a few minutes by the ACS. The only pending-shaped edge cases are recovery scenarios — the shopper's browser doesn't return cleanly from the ACS, or the merchant times out mid-call — and even those resolve within minutes via **status query** or **auth reversal**, not a multi-hour wait.
 
 ### LPM authorization flows
 
@@ -110,12 +111,12 @@ Where cards converge on the two shapes above, LPMs are far more diverse — they
 - **In-app / super-app context** — entirely inside a wallet or super-app; no handoff to a separate environment. Examples: **WeChat Pay**, **Alipay** (CN), **Kakao Pay** (KR).
 - **Push notification** — a notification into the shopper's bank or wallet app that the shopper opens to approve. Examples: **Swish** (SE), **MobilePay** (DK / FI), **Bizum** (ES).
 - **SMS** — an OTP or link sent to the shopper's phone to confirm the charge. Examples: **direct carrier billing** (Boku, Fortumo), legacy SMS-OTP flows on regional cards.
-- **Embedded code entry** — the shopper types a code generated elsewhere directly on the merchant page; the merchant relays it to the rail. Examples: **BLIK** (PL, 6-digit code from the bank app), **M-Pesa STK PIN** (Kenya).
+- **Embedded code entry** — the shopper types a code generated elsewhere directly on the merchant page; the merchant relays it to the rail. Examples: **BLIK** (PL, 6-digit code from the bank app), **M-Pesa STK PIN** (KE).
 - **Voucher / pay-by-code** — merchant shows a reference; the shopper pays later at a store counter, ATM, or via online banking. Examples: **Boleto Bancário** (BR), **OXXO Pay** (MX), **Konbini** (JP).
 - **Bank transfer with reference** — the shopper initiates a push credit from their own banking app to a merchant-supplied account + reference. Examples: **SEPA Credit Transfer** (EU), **Faster Payments** (UK), **PIX copy-and-paste key** (BR).
 - **Manual / offline confirmation** — the final confirmation lands through a non-interactive channel minutes to days after the shopper's action. Examples: **cash on delivery** (IN, SEA, LATAM), **bank wire** reconciled manually.
 
-The common property across all of these channels is that **the shopper leaves the merchant's environment** (often the PSP's and acquirer's environments too) to complete the payment. Nobody in the processing chain has direct visibility into what the shopper is doing until the rail reports back. The authorization result is therefore **asynchronous by nature** — not a special case, the default. Reliable integrations depend on **regular status checks**, **webhooks**, or both, and must not conflate "API returned" with "payment succeeded."
+The common property across all of these channels is that **the shopper leaves the merchant's environment** (often the PSP's and rail operator's environments too) to complete the payment. Nobody in the processing chain has direct visibility into what the shopper is doing until the rail reports back. The authorization result is therefore **asynchronous by nature** — not a special case, the default. Reliable integrations depend on **status queries**, **webhooks**, or both, and must not conflate "API returned" with "payment succeeded."
 
 ### Authorization state machine
 
@@ -124,10 +125,10 @@ Because authorization can be async and the shopper isn't always reachable, every
 The states an authorization moves through:
 
 - **`Received`** — the only non-terminal state. The authorization has been submitted and the expiry clock is running. Every other state is a transition out of `Received`.
-- **`Authorised`** — the rail confirmed before expiry. On cards (two-step), this leaves an **authorization hold** that waits for a capture instruction. On most LPMs, the rail-level confirmation already moved the funds, so the authorization arrives at *captured* in one step. Either way, every subsequent capability — capture, cancel, refund, dispute, settlement match — operates on the authorization once it reaches `Authorised`, not on the Authorize capability itself.
+- **`Authorised`** — the rail confirmed before expiry. On cards (two-step), this leaves an **authorization hold** that waits for a capture instruction. On most LPMs, the rail-level confirmation already moved the funds, so the subsequent **Capture** is a no-op — but the Authorize state machine still terminates here at `Authorised`. Either way, every downstream capability — capture, cancel, refund, dispute, settlement match — operates on the authorization once it reaches `Authorised`, not on the Authorize capability itself.
 - **`Declined`** — any party in the chain (issuer, rail operator, fraud engine, acquirer, PSP) refused to proceed and returned a negative final result before expiry.
 - **`Error`** — connectivity loss, malformed responses, signature mismatches, or unrecoverable downstream errors prevented a clean outcome. Distinct from `Declined` because no party actually decided — the system failed to carry the decision.
-- **`Expired`** — the deadline elapsed without a final result. The integration triggers a **reverse request** automatically (a cancel if the rail supports it, otherwise a refund on any funds that may have landed despite the expiry) so no money is held in an ambiguous state.
+- **`Expired`** — the deadline elapsed without a final result. The integration triggers an **auth reversal** automatically (a void if the rail supports it, otherwise a refund on any funds that may have landed despite the expiry) so no money is held in an ambiguous state.
 - **`Closed`** — the shopper explicitly aborted the flow (pressed **back**, **cancel**, or closed the bank app mid-challenge). Distinct from `Expired`: the trigger is an active shopper action, not a timeout.
 
 ```mermaid
@@ -147,9 +148,9 @@ stateDiagram-v2
 
 ### The five lenses
 
-- **Semantics** — confirm payer intent and obtain rail authorisation **before** (cards) or **together with** (LPMs) the money movement. Input: amount, currency, merchant context, payment instrument (PAN, token, bank handle, wallet payload), and an expiry. Output: a final disposition — **authorised**, **declined**, **technical error**, **expired**, or **closed** — and, once authorised, either an **authorization hold** (cards, two-step) or a completed credit transfer (most LPMs), plus **authentication evidence** (CAVV/ECI, SCA result) where the rail produces one.
+- **Semantics** — confirm payer intent and obtain rail authorisation **before** (cards) or **together with** (LPMs) the money movement. Input: amount, currency, merchant context, payment instrument (PAN, token, bank handle, wallet payload), and an expiry. Output: a final disposition — **authorised**, **declined**, **technical error**, **expired**, or **closed** — and, once authorised, either an **authorization hold** (cards, two-step) or a completed funds movement (most LPMs), plus **authentication evidence** (CAVV/ECI, SCA result) where the rail produces one.
 - **State model** — one in-flight state (waiting for the rail's final result) and five terminal outcomes: *authorised*, *declined*, *technical error*, *expired*, *closed*. The in-flight phase may internally distinguish sub-stages (awaiting authentication, awaiting shopper action, awaiting rail confirmation) for diagnostics, but every transition out of in-flight lands in exactly one terminal. The post-authorisation transition — from auth hold to captured — belongs to the **Capture** capability, not Authorize.
-- **Recovery** — **idempotency keys** on the authorization request are mandatory: the same key replayed after a network-level timeout must return the *same* authorization attempt, never create a duplicate. Lost responses are resolved by **status query** or **auth reversal**, never by blind replay without a key. *Technical error* outcomes require operator-grade investigation via status query: the rail is the source of truth, and the merchant must be able to diff its local authorization records against the rail's view. On *expiry*, the integration must issue the automatic reverse request and be safe against the rare "late success" where the rail confirms after the deadline — the reverse must then become a **refund** of the funds that landed. *Declined* outcomes carry categories (**issuer decline**, **risk decline**, **soft decline / do-retry**, **hard decline / do-not-retry**) so downstream business-retry policies are safe.
+- **Recovery** — **idempotency keys** on the authorization request are mandatory: the same key replayed after a network-level timeout must return the *same* authorization attempt, never create a duplicate. Lost responses are resolved by **status query** or **auth reversal**, never by blind replay without a key. *Technical error* outcomes require operator-grade investigation via status query: the rail is the source of truth, and the merchant must be able to diff its local authorization records against the rail's view. On *expiry*, the integration must issue the automatic auth reversal and be safe against the rare "late success" where the rail confirms after the deadline — the reversal must then become a **refund** of the funds that landed. *Declined* outcomes carry categories (**issuer decline**, **risk decline**, **soft decline / do-retry**, **hard decline / do-not-retry**) so downstream business-retry policies are safe.
 - **Time discipline** — the authorization's **expiry** is the primary clock and should be propagated to every party that can honor it. Beyond that, rail-specific sub-clocks apply: a 3DS challenge has a challenge timeout; bank redirects have session timeouts; voucher LPMs hold the reference for hours to days; authorization **holds** (post-authorisation, pre-capture, on cards and two-step LPMs) have their own validity (typically 7 days on cards, longer for travel and lodging). *Expiry* is rarely pushed reliably as an event — it must be detected by polling.
 - **Observability** — synchronous response when the rail allows it; **webhook** for every state transition (terminal outcomes — *authorised*, *declined*, *technical error*, *expired*, *closed* — plus intermediate sub-stages worth exposing for diagnostics); **status query** on the authorization id (and, where supported, the idempotency key) as the ultimate tiebreaker — it must return the current state plus the artifacts produced by authorisation itself (auth code or rail reference, authentication evidence, hold validity for two-step cards, decline reason where applicable), and it must be safely repeatable so the merchant can sweep authorizations stuck in-flight after a missed webhook, a signature-verification failure, or a recovery from a merchant-side outage.
 
