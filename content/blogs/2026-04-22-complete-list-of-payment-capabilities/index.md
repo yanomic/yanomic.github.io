@@ -77,7 +77,7 @@ stateDiagram-v2
     Terminated --> [*]
 ```
 
-**The five lenses**
+**The Five Lenses**
 - **Semantics** — answer one question: *"May this merchant submit transactions of type X, in country Y, on rail Z, from date D?"* Output is a credentialed identity, a scope (brands, MCCs, currencies, volumes, entity), and the channels through which subsequent capabilities will be invoked.
 - **State model** — the state machine above is the source of truth. `PartiallyApproved` is the trap most integrations miss; `InfoRequested` is the only non-terminal state where the *merchant* holds the next action; `Rejected` and `Terminated` are final.
 - **Recovery** — the merchant-side retry loop is **resubmitting a specific artifact**, not re-running the application. Well-designed onboarding APIs anchor on an **application ID** (idempotent updates), expose **per-artifact upload endpoints**, and return **structured rejection reasons** ("license document unreadable", "MCC not permitted") so follow-up can be automated instead of email-threaded.
@@ -91,7 +91,7 @@ Authorization is the most consequential capability in the lifecycle. It **marks 
 
 **Cards vs alternative methods split at the end of this step.** For cards, authorization reserves funds but does **not** move them; a separate **capture** is required to push the transaction into clearing. For most LPMs, the split does not exist: authorization and capture happen **together** in a single shopper action — when the rail confirms the transfer, the money is already on its way, and there is no second capture instruction to send. The capture capability from the next section is effectively a no-op on those rails. **Vouchers and offline-confirmation LPMs are the exception**: like cards, they are two-step — the rail issues a reference at authorization time, and the actual payment confirmation arrives later (sometimes days later) when the shopper completes the payment off-rail.
 
-### Card authorization flows
+### Card Authorization Flows
 
 On cards, three shapes dominate:
 
@@ -101,7 +101,7 @@ On cards, three shapes dominate:
 
 Either way, the merchant gets a **synchronous, final authorization outcome** once any authentication and the auth message complete — `authorised`, `declined`, or technical `error`, with no fourth bucket called *"we'll let you know in a few minutes."* The whole chain runs on tight, scheme-enforced clocks: the issuer answers the auth message in seconds (and if it doesn't, the scheme returns a **stand-in** decision in its place), and the 3-D Secure challenge itself is bounded to a few minutes by the ACS. The only pending-shaped edge cases are recovery scenarios — the shopper's browser doesn't return cleanly from the ACS, or the merchant times out mid-call — and even those resolve within minutes via **status query** or **auth reversal**, not a multi-hour wait.
 
-### LPM authorization flows
+### LPM Authorization Flows
 
 Where cards converge on the two shapes above, LPMs are far more diverse — they were designed to fit local markets and user behavior rather than a single rail. The channels worth distinguishing:
 
@@ -118,7 +118,7 @@ Where cards converge on the two shapes above, LPMs are far more diverse — they
 
 The common property across all of these channels is that **the shopper leaves the merchant's environment** (often the PSP's and rail operator's environments too) to complete the payment. Nobody in the processing chain has direct visibility into what the shopper is doing until the rail reports back. The authorization result is therefore **asynchronous by nature** — not a special case, the default. Reliable integrations depend on **status queries**, **webhooks**, or both, and must not conflate "API returned" with "payment succeeded."
 
-### Authorization state machine
+### Authorization State Machine
 
 Because authorization can be async and the shopper isn't always reachable, every robust integration treats an authorization as a stateful resource with a bounded **expiry** — the wall-clock deadline after which, if no final outcome has arrived, the authorization is no longer redeemable. When supported, the expiry should be **shared across all parties**: the acquirer includes it in the request to the issuer or rail operator, and echoes it back to the merchant on the response, so everyone agrees on the same clock. The merchant closes the order once expiry passes; the issuer or rail rejects any confirmation arriving after it.
 
@@ -146,7 +146,7 @@ stateDiagram-v2
     Authorised --> [*]: handed to Capture capability
 ```
 
-### The five lenses
+### The Five Lenses
 
 - **Semantics** — confirm payer intent and obtain rail authorisation **before** (cards) or **together with** (LPMs) the money movement. Input: amount, currency, merchant context, payment instrument (PAN, token, bank handle, wallet payload), and an expiry. Output: a final disposition — **authorised**, **declined**, **technical error**, **expired**, or **closed** — and, once authorised, either an **authorization hold** (cards, two-step) or a completed funds movement (most LPMs), plus **authentication evidence** (CAVV/ECI, SCA result) where the rail produces one.
 - **State model** — one in-flight state (waiting for the rail's final result) and five terminal outcomes: *authorised*, *declined*, *technical error*, *expired*, *closed*. The in-flight phase may internally distinguish sub-stages (awaiting authentication, awaiting shopper action, awaiting rail confirmation) for diagnostics, but every transition out of in-flight lands in exactly one terminal. The post-authorisation transition — from auth hold to captured — belongs to the **Capture** capability, not Authorize.
