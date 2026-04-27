@@ -13,11 +13,11 @@ tags:
 
 ## Introduction
 
-Payment methods do not behave the same way. The split between cards and local payment methods is the obvious one, but each category hides its own variations.
+Payment methods do not behave the same way. The split between cards and local payment methods (**LPMs**) is the obvious one, but each category hides its own variations.
 
-This creates real friction on both sides. Merchants want to accept payments reliably. Shoppers want to pay with their preferred method. Both sides end up navigating inconsistent capabilities, edge cases, and operational trade-offs they should not need to know about to complete a simple transaction.
+This creates real friction on both sides. **Merchants** want to accept payments reliably. **Shoppers** want to pay with their preferred method. Both sides end up navigating inconsistent capabilities, edge cases, and operational trade-offs they should not need to know about to complete a simple transaction.
 
-This blog series focuses on merchant-facing APIs and describes capabilities from a functional perspective — the observable inputs, outputs, and behavior of each payment "black box." Provider-specific implementation details are out of scope.
+This blog series focuses on **merchant-facing APIs** and describes **capabilities from a functional perspective** — the observable inputs, outputs, and behavior of each payment "black box." Provider-specific implementation details are out of scope.
 
 We also compare payment methods and PSPs against a standard set of capabilities. The goal is a common integration model that absorbs method-specific characteristics rather than leaking them into merchant code.
 
@@ -44,7 +44,6 @@ sequenceDiagram
     participant Mer as Merchant / PSP
     participant Acq as Acquirer
     participant Sch as Scheme
-    Note over Sch,Acq: Scheme sets rules, and the acquirer must enforce them on sponsored merchants.
     Mer->>Acq: Apply (KYC, business model, MCC, channels, volumes)
     Acq->>Acq: Underwriting, PCI / data review vs scheme requirements
     opt Registration or scheme review required
@@ -87,7 +86,9 @@ sequenceDiagram
     G->>Mer: Authorized or declined
 ```
 
-### Capture
+### Post-authorization operations
+
+#### Capture
 The merchant (or automated rules) sends **capture** instructions for all or part of the authorized amount. The acquirer **presents** those transactions into clearing: the scheme exchanges clearing records with the issuer so the charge can be posted to the cardholder. Capture is about what is owed and **moving the transaction into clearing**; it is still distinct from **settlement**, where money actually moves between banks.
 
 ```mermaid
@@ -102,22 +103,7 @@ sequenceDiagram
     Iss->>Iss: Post charge to cardholder
 ```
 
-### Settlement
-After clearing, **interbank settlement** nets obligations between issuer and acquirer according to the scheme's arrangements. Separately, the **acquirer settles to the merchant**: payout timing, reserves, and fees are defined in the merchant's contract. The scheme orchestrates settlement between issuer and acquirer; it does not replace the acquirer's merchant payout.
-
-```mermaid
-sequenceDiagram
-    participant Iss as Issuer
-    participant Sch as Scheme
-    participant Acq as Acquirer
-    participant Mer as Merchant
-    Note over Iss,Sch: Net settlement of cleared obligations
-    Iss->>Sch: Member settlement leg
-    Sch->>Acq: Member settlement leg
-    Acq->>Mer: Merchant payout per contract
-```
-
-### Cancel / Void
+#### Cancel
 If the merchant will not capture — order canceled, inventory unavailable, or duplicate auth — they **void** or **cancel** the authorization while it is still valid. The acquirer asks the issuer to **release the hold**; no capture means no clearing/settlement for that authorization. Naming varies by provider (`void`, `cancel`, `reverse authorization`); the idea is the same: end the hold without taking money.
 
 ```mermaid
@@ -139,7 +125,7 @@ sequenceDiagram
     G->>Mer: Final status
 ```
 
-### Refund
+#### Refund
 Refunds return money to the cardholder after a successful capture. They are initiated on the **merchant/acquirer** side and ride the card rails as a **credit**; timing, partial refunds, and cutoffs depend on network and issuer rules.
 
 ```mermaid
@@ -153,6 +139,21 @@ sequenceDiagram
     Acq->>Sch: Credit / refund message
     Sch->>Iss: Post credit
     Iss->>Ch: Cardholder sees credit
+```
+
+### Settlement
+After clearing, **interbank settlement** nets obligations between issuer and acquirer according to the scheme's arrangements. Separately, the **acquirer settles to the merchant**: payout timing, reserves, and fees are defined in the merchant's contract. The scheme orchestrates settlement between issuer and acquirer; it does not replace the acquirer's merchant payout.
+
+```mermaid
+sequenceDiagram
+    participant Iss as Issuer
+    participant Sch as Scheme
+    participant Acq as Acquirer
+    participant Mer as Merchant
+    Note over Iss,Sch: Net settlement of cleared obligations
+    Iss->>Sch: Member settlement leg
+    Sch->>Acq: Member settlement leg
+    Acq->>Mer: Merchant payout per contract
 ```
 
 ### Dispute / Chargeback
