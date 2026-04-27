@@ -271,23 +271,32 @@ Cards are not universally "better"; they are a **shared rail with predictable ro
 
 ## Payment Capabilities
 
-The **Ecosystem and Lifecycle** section above describes *who* is involved and *what happens* from onboarding through disputes. **Payment capabilities** are the complementary lens: the operations and signals merchant-facing APIs expose so each phase can be driven and observed reliably, without guesswork or manual follow-up.
+In the following blogs of this series, we will walk through capabilities across the **entire lifecycle** and describe each through a consistent five-lens framework.
 
-Reliability here means predictable **semantics** (what a call does and does not do), a usable **state model** (statuses and allowed transitions), **recovery** (idempotency, safe retries, clear errors), **time discipline** (expiry, capture windows, settlement latency), and **observability** (queries or webhooks that reflect reality soon enough for operations). Comparing methods is not just whether capabilities exist, but how consistently they behave across error shapes, transitions, and asynchronous constraints. This is especially where LPMs stress integrations (pending flows, shopper action outside the browser, weaker refund/cancel paths), and why a **standard capability model** helps compare rails on equal footing while preserving method-specific behavior.
+The **Ecosystem and Lifecycle** section above describes *who* is involved and *what happens* from onboarding through disputes. **Payment capabilities** are the complementary lens: the merchant-facing operations and signals that make each phase executable, recoverable, and observable without guesswork or manual follow-up.
+
+Those five lenses are worth defining once up front, because what differs across rails is rarely whether a capability exists, but **how it behaves**:
+
+- **Semantics** — what the capability does and does not do. The input/output contract, and the single question it answers.
+- **State model** — the statuses it produces or transitions, and the allowed transitions between them. Which states are terminal, which are asynchronous, and where the next step lives.
+- **Recovery** — how to stay correct under retries, timeouts, partial failures, duplicate webhooks, and out-of-order events. Idempotency anchors, reconciliation primitives, and safe fallbacks.
+- **Time discipline** — the clocks and windows that govern the capability: review SLAs, expirations, capture windows, representment deadlines, settlement lags.
+- **Observability** — how the merchant learns the current state and the history behind it: synchronous responses, status queries, webhooks, reports, and reconciliation files.
+
+Comparing methods is therefore not just about whether a capability exists, but whether it behaves consistently under retries, asynchronous flows, deadline pressure, and failure. This is why a common capability model helps compare rails on equal footing while preserving method-specific behavior.
 
 Typical capabilities and the reliability problem each one addresses:
 
-- **Authorize**: Reserve funds or confirm intent before final collection, so checkout can commit without immediately moving money. Reliability requires clear outcomes and holds that match issuer behavior.
-- **Capture**: Collect funds (full or partial, where supported) after authorization or confirmation, aligned with fulfillment. Reliability requires amount rules, timing discipline, and idempotency on retries.
-- **Cancel / void**: Release an authorization or cancel a still-cancellable payment so no stray capture happens and no ambiguous "half-open" state sits between the order system and the rail.
-- **Refund**: Return money after a successful collection with traceable linkage to the original payment; reliability depends on partial refunds, cutoffs, and consistent final states.
-- **Status check (query / retrieve)**: Read the current state (`Pending`, `Authorized`, `Captured`, `Failed`, `Canceled`, `Refunded`, …) when the UI session, webhooks, or clocks do not give a single synchronous answer — essential whenever phases complete **asynchronously**.
-- **Tokenize / save payment credential**: Create and store a reusable token (or saved instrument id) without retaining raw credential data; reliability requires clear scope, lifecycle controls, and deterministic token-to-instrument linkage.
-- **Charge with saved token (CIT/MIT)**: Reuse a stored token for subsequent payments, with explicit initiator classification (**customer-initiated** vs **merchant-initiated**) and correct category indicators (for example recurring or unscheduled) to avoid issuer ambiguity.
-- **Stored agreement / mandate lifecycle**: Record, retrieve, update, and revoke shopper consent (or mandate) for repeat charging, so token reuse remains auditable and compliant across renewals, retries, and cancellations.
+- **[Onboarding]({{< ref "2026-04-21-payment-capability-onboarding" >}})**: Establish merchant identity, permitted scope (brands, MCCs, countries), and technical channels before any transaction flows can begin.
+- **[Authorize]({{< ref "2026-04-23-payment-capability-authorize" >}})**: Reserve funds or confirm intent as the entry point into transaction lifecycle state.
+- **[Cancel]({{< ref "2026-04-24-payment-capability-cancel" >}})**: Release an active authorization hold before clearing is accepted (DMS-only; no money movement).
+- **[Capture]({{< ref "2026-04-25-payment-capability-capture" >}})**: Convert authorization into collectable funds; supports timing and amount variants where the rail allows.
+- **[Refund]({{< ref "2026-04-26-payment-capability-refund" >}})**: Return money after clearing; universal undo path when cancel is unavailable or too late.
+- **[Tokenization]({{< ref "2026-04-27-payment-capability-tokenize" >}})**: Create and manage reusable payment credentials, including charging with saved tokens (`CIT/MIT`) and mandate/agreement lifecycle for recurring or merchant-initiated collection.
+- **[Dispute / chargeback]({{< ref "2026-04-28-payment-capability-dispute-chargeback" >}})**: Receive cases, submit evidence, and track representment outcomes under rail rules.
+- **[Settlement / payout]({{< ref "2026-04-29-payment-capability-settlement-payout" >}})**: Observe and reconcile net funds movement from captures, refunds, fees, and adjustments.
 
-## What’s Next
-In upcoming blogs, we will:
-- Define a complete payment capabilities map.
-- Compare how leading PSP APIs support each capability.
-- Show how this model evolves from payment functions to payment products and payment services.
+## Closing
+
+This chapter establishes the lifecycle and capability vocabulary used throughout the rest of the series. Each linked chapter goes deeper on one phase, using the same five-lens frame so differences across rails are explicit and comparable.
+
