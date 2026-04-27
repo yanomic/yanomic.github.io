@@ -1,7 +1,7 @@
 ---
 description: Editorial tone, structure, and terminology for yanomic blog posts
 globs: content/blogs/**/*.md
-alwaysApply: false
+alwaysApply: true
 ---
 
 # Blog Editorial Style

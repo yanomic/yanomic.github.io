@@ -215,13 +215,60 @@ stateDiagram-v2
 - **Time discipline** — the **capture window** is rail- and contract-specific (typical cards: 7 days; lodging / auto-rental: longer by agreement; many LPMs: immediate-only). Late captures carry both cost and decline risk: they trigger **interchange downgrades** into higher-rate categories, increase the likelihood of an **issuer decline at clearing** as the original authorization ages, and are rejected as `CaptureFailed` once the window has elapsed. At that point the capture's lifecycle is terminally closed, and the merchant must return to **Authorize** (with fresh SCA where required) before any collection is possible. Batch flows add a second clock — the acquirer's **clearing cutoff** — that determines which day's settlement a capture lands in.
 - **Observability** — webhook on every transition (`Captured`, `CaptureFailed`, `CaptureError`); status query exposing authorized vs captured amounts and remaining balance; capture line items on the daily settlement report as the final reconciliation source. For batch flows, a **batch acknowledgement** linking each capture line to its enclosing batch is required — without it, individual `CaptureError` causes are invisible inside an otherwise-accepted batch.
 
-## Cancel / Void
+## Cancel
 
-- **Semantics** — end a still-cancellable authorization or pending payment so that no stray capture happens and no ambiguous "half-open" state sits between the order system and the rail. Same intent, different names: `void`, `cancel`, `reverse authorization`.
-- **State model** — valid from `Authorised` (before capture) and from `PendingShopperAction` (before the shopper has committed). Terminal state is `Canceled` (alias `Voided` on cards). Cancelling after capture is not this capability — that is a **refund**.
-- **Recovery** — idempotent on the original payment reference. A cancel that races a capture must fail with a deterministic error (`already_captured`) so the integration switches to refund cleanly instead of looping between the cancel and capture endpoints.
-- **Time discipline** — on cards, voids are free and must reach the acquirer before the **clearing cutoff** (typically end-of-day in the acquirer's local time). After the cutoff the operation degrades to a refund even when the API label stays the same. Many LPMs expose no `void` at all — the only cancellation path is letting the pending authorization expire.
-- **Observability** — webhook on the `Canceled` transition; status query that distinguishes `Canceled` (hold released, no money moved) from `Refunded` (money moved both ways). Issuer-side hold release lags on the cardholder's statement and must not be confused with the rail state.
+Cancel is the instruction that releases an **active authorization hold** before it is captured. It only makes sense in the **DMS** model, where authorization reserves funds without moving them and a separate capture is required to push the transaction into clearing — which is also why the capability is variously called `void`, `cancel`, `reverse authorization`, or `auth reversal` across PSPs and schemes. On **SMS** rails the money has already moved by the time authorization succeeds, so there is no hold to release; the equivalent business outcome is a **refund**, and a cancel call against an SMS payment is rejected as not-applicable.
+
+The primary use is **proactive** — the merchant releases the hold themselves rather than waiting for the authorization's expiry to do it. Reasons span the order lifecycle: shopper changes their mind before shipment, out-of-stock detected after authorize, fraud signal lands between authorize and capture, hotel guest cancels before check-in. Letting the hold sit until expiry instead — typically 7 days on cards, longer for travel and lodging — keeps the shopper's available credit or available balance reduced for no reason and is a common source of customer complaints.
+
+### Partial Cancel
+
+A **partial cancel** — also called a **partial reversal** in scheme messaging — releases part of an authorization hold while leaving the remainder live for later capture. Both Visa and Mastercard define the message; **not every acquirer exposes it**, and many PSP API surfaces omit it because the use case overlaps with **partial capture** (capturing less than the authorized amount implicitly releases the unused balance).
+
+The case where partial cancel is the right primitive — and partial capture is not — is when the merchant wants to **reduce the hold without capturing anything yet**. Examples: one line item in a multi-item order falls through but the rest still has not shipped, so capture is premature. Multiple partial cancels can stack against the same authorization, each reducing the remaining authorized balance, until the balance reaches zero (effectively a full cancel) or the merchant captures whatever is left.
+
+> **LPMs essentially never support partial cancel.** The few rails that expose any cancel at all expose only the full-amount form, and on most LPMs even that does not exist.
+
+### Cancel After Capture Is Submitted
+
+The interesting failure mode is when the merchant has already submitted a capture. The outcome depends on **which state the capture has reached** in its own lifecycle:
+
+- **Capture in `CaptureReceived` (pre-cutoff).** The acquirer accepted the capture instruction but it is still sitting in the pending batch and has not been presented to the scheme. On many cards-on-acquirer combinations the cancel is treated as a **pull-from-batch** — the line is removed before the batch flushes, no clearing happens, no interchange is charged, and the cardholder never sees a posted charge or a refund line. PSP API surfaces vary on this: some route a `cancel` call here automatically, some require an explicit `void`, some refuse the call and force the merchant to refund regardless. The rail behavior, not the API verb, is the source of truth.
+- **Capture in `Captured` (post-cutoff).** Clearing has accepted the capture; money is on its way to settlement and there is no hold left to release. The cancel call fails because the capture has already cleared, and the merchant must switch to **refund** — a separate money movement back to the shopper. Two consequences are merchant-visible: the cardholder sees **both a posted charge and a separate refund line** on their statement (very different from a true cancel, which leaves no trace), and the merchant **still pays interchange and scheme fees** on the original capture even though the net funds movement is zero.
+
+A genuine **race** between capture and cancel arriving in the same window is resolved by the rail's deterministic ordering on the authorization id: **whichever lands first wins**, and the loser is rejected with a deterministic error indicating the prior operation has already taken effect — either the capture has already been accepted (cancel lost), or the cancel has already been processed (capture lost). The integration must be idempotent on both legs and route to the appropriate remediation — refund the captured amount, or accept the cancel — without retrying the loser blindly.
+
+### Cancel State Machine
+
+Cancel is **typically synchronous at the API surface** — the acquirer accepts or refuses the cancel in the same call, in seconds — because no clearing instruction is dispatched and no batch needs to drain. A handful of LPMs that expose a cancel at all (rare; most do not) confirm asynchronously via webhook, and the integration should not assume one shape over the other.
+
+> **Note on issuer-side hold release:** A synchronous `Canceled` response from the acquirer does **not** mean the hold has disappeared from the cardholder's statement. Issuers release holds on their own cadence — minutes to several days — and the cardholder may continue to see a *pending* line until the issuer processes the reversal. The rail state and the cardholder-visible state are distinct, and merchant support flows must answer for both.
+
+The states a cancel moves through:
+
+- **`CancelReceived`** — the only non-terminal state. The cancel has been accepted by the acquirer and is in flight toward the rail. On rails that resolve synchronously, this state is transient and never externally observed; on rails that confirm via webhook it persists until the rail responds.
+- **`Canceled`** — the rail accepted the cancel and the authorization hold is released at the rail (issuer-visible release lags as noted above). Alias `Voided` on cards. The parent authorization transitions to `Canceled` at the same time.
+- **`CancelFailed`** — the rail refused the cancel. Common causes: the authorization was already captured, already expired, or the acquirer rejected the request for scheme-rule reasons. Distinct from `CancelError` because the rail actually decided.
+- **`CancelError`** — connectivity loss, malformed request, signature mismatch, or unrecoverable downstream errors prevented a clean outcome. Resolved via **status query** on the cancel reference and idempotent replay — never a blind retry.
+
+```mermaid
+stateDiagram-v2
+    [*] --> CancelReceived: cancel submitted
+    CancelReceived --> Canceled: rail accepts
+    CancelReceived --> CancelFailed: rail refuses
+    CancelReceived --> CancelError: technical failure
+    Canceled --> [*]
+    CancelFailed --> [*]
+    CancelError --> [*]
+```
+
+### The Five Lenses
+
+- **Semantics** — release an active authorization hold before capture so no stray capture happens and the shopper's available credit / balance is restored. Supports **full** and, on rails that expose it, **partial cancel** (also called *partial reversal*); LPMs essentially never support either. **DMS-only by definition**; cancel does not apply on SMS rails, where the equivalent business outcome is a **refund**. Same intent, different names: `void`, `cancel`, `reverse authorization`, `auth reversal`.
+- **State model** — valid only when the parent authorization is in `Authorised` (post-auth, pre-capture). One in-flight state (`CancelReceived`, often unobserved on synchronous rails) and three terminal outcomes: `Canceled`, `CancelFailed`, `CancelError`. Partial cancels produce per-cancel instances and a remaining authorized balance that drains toward zero or is later captured. The parent authorization transitions to `Canceled` once the remaining balance reaches zero. Cancelling after capture is not this capability — it is a **refund**.
+- **Recovery** — idempotent on the original authorization reference (and on a merchant-supplied cancel reference where the API exposes one) so retries do not double-cancel or trigger spurious already-canceled errors. A cancel that races a capture must fail deterministically — the response indicates the capture has already been accepted — so the integration switches to refund cleanly. After a `CancelError`, the safe primitive is **status query** on the authorization, not a blind retry that risks acting on a stale view.
+- **Time discipline** — the cancel window is bounded by **two clocks**, whichever comes first. On cards, voids are free and must reach the acquirer before the **clearing cutoff** (typically end-of-day in the acquirer's local time); after the cutoff the operation degrades to a refund even when the API label stays the same. The authorization's own **expiry** is the other ceiling — once it elapses the cancel call hits a terminal state. Many LPMs expose no cancel at all; the only cancellation path is letting the pending authorization expire.
+- **Observability** — synchronous response on rails that confirm in-call; webhook on the `Canceled` / `CancelFailed` transition where the rail is async; status query that distinguishes `Canceled` (hold released, no money moved) from `Refunded` (money moved both ways). 
 
 ## Refund
 
