@@ -1,0 +1,46 @@
+---
+description: Editorial tone, structure, and terminology for yanomic blog posts
+globs: content/blogs/**/*.md
+alwaysApply: false
+---
+
+# Blog Editorial Style
+
+Yanomic blog posts read as professional technical reference writing — dense, opinionated, and accurate. Apply the following when drafting or editing any blog under `content/blogs/`.
+
+## Tone
+
+- **Direct, not obscure.** The reader should grasp the meaning on first pass. Lead with the claim, not the build-up. Name actors, verbs, and objects concretely. One claim per sentence — split when a sentence runs three independent clauses.
+- **Precise over formal.** Pick the word that carries meaning most cleanly. In technical prose that is often the precise term (*transition*, *interchange downgrade*, *expose*); elsewhere it is usually the plain word (*use* not *utilize*, *show* not *demonstrate*, *need* not *requirement*). Reach for heavier vocabulary only when the meaning shifts (*typically* vs *often*, *remainder* vs *rest*, *surrenders* vs *gives up*) — never for tone alone.
+- **Active voice, concrete subject.** *The merchant must return to* over *is back at*. Name the actor.
+- **Drop fillers.** Cut *actually*, *just*, *really*, *the moment*, *kind of*, and hedges that carry no meaning.
+- **Cautious truth.** If a claim is true at one level (e.g. rail mechanism) but a reader may have a counter-example at another (e.g. PSP API surface), acknowledge the counter-example in a single sentence rather than weakening the original claim.
+
+## Industry terminology (especially payments)
+
+- **Use the names schemes and processors actually use.** *Interchange downgrade* (not *degrade interchange*); *issuer decline at clearing* (not *delayed-capture representment*); *Single-Message System (SMS)* / *Dual-Message System (DMS)*; *incremental authorization*; *capture window*; *clearing cutoff*; *MID*; *representment* only for chargeback re-presentment.
+- **Map alternative idioms once.** When a term has multiple names — e.g. SMS = `sale` / `purchase`, DMS = `auth + capture` / *two-step* — name the alternates parenthetically on first use, then commit to one for the rest of the post.
+- **Validate before adopting a term.** Flag misuses found in drafts and propose the correct one with a brief rationale.
+
+## Structure
+
+- **Five-Lens framework for capabilities.** Capability sections close with a `### The Five Lenses` subsection covering, in order: *Semantics, State model, Recovery, Time discipline, Observability* — each as a single bullet.
+- **Capability section order:** intro prose → operational shape (timing / variants) → state machine → Five Lenses.
+- **Definition → boundary → examples.** Inside bullets and paragraphs, lead with the definition, give the bounding clock or scope next, and place concrete examples last.
+- **State machines get a Mermaid diagram.** Use `stateDiagram-v2`; terminal states drain to `[*]`. State names in PascalCase, referenced as `` `StateName` `` in prose.
+- **Side notes go in blockquotes** with a bold lead-in label, e.g. `> **Note on PSP API surfaces:** ...`.
+
+## Mechanical conventions
+
+- Bullet glyph: `-` (hyphen). Never `*`.
+- `vs` without a period.
+- Em-dash (`—`) for parenthetical clauses, never double hyphens.
+- Bold (`**`) only for keyword introductions and named concepts; never for emphasis-emphasis.
+- Backticks for state names, status values, and API field names.
+- No trailing semicolons connecting bullet items; each bullet ends with a full stop.
+
+## Review behaviour
+
+- **Validate first, edit second.** Check every factual claim against existing knowledge. For claims that fall outside confident knowledge — specific percentages, scheme rule numbers, current product names, regulatory dates, recent industry events — verify via web search or official documentation rather than passing them through. Acknowledge uncertainty explicitly when verification is incomplete; never assert with false confidence.
+- **Order of edits:** technical accuracy first, then structural moves (lens placement, section ordering, definition / boundary / example sequence), then prose polish.
+- **Offer to apply** the change as a concrete edit rather than only describing it.
