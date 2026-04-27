@@ -13,13 +13,13 @@ tags:
 
 ## Introduction
 
-Not every payment method behaves the same way. The difference between cards and local payment methods is usually obvious, but there are also important nuances within each category.
+Payment methods do not behave the same way. The split between cards and local payment methods is the obvious one, but each category hides its own variations.
 
-For both merchants and shoppers, this creates real friction. Merchants want to accept payments reliably, and shoppers want to pay with their preferred method, but both sides are often forced to navigate inconsistent capabilities, edge cases, and operational trade-offs. They should not have to become payments experts just to complete a simple transaction.
+This creates real friction on both sides. Merchants want to accept payments reliably. Shoppers want to pay with their preferred method. Both sides end up navigating inconsistent capabilities, edge cases, and operational trade-offs they should not need to know about to complete a simple transaction.
 
-In this blog series, we focus on merchant-facing APIs and describe capabilities from a functional perspective. We do not go deep into implementation details, which vary across providers; instead, we concentrate on the observable inputs, outputs, and behavior of each payment "black box."
+This blog series focuses on merchant-facing APIs and describes capabilities from a functional perspective — the observable inputs, outputs, and behavior of each payment "black box." Provider-specific implementation details are out of scope.
 
-We also compare payment methods / payment service providers against a standard set of capabilities that can reduce experience differences across methods, and discuss how method-specific characteristics can be bridged into a more standardized integration model.
+We also compare payment methods and PSPs against a standard set of capabilities. The goal is a common integration model that absorbs method-specific characteristics rather than leaking them into merchant code.
 
 ## Ecosystem and Lifecycle
 
@@ -55,7 +55,7 @@ sequenceDiagram
 ```
 
 ### Authorization
-Payment initiation is the merchant starting an authorization: assemble amount, currency, merchant identifiers, and card details, and send the **authorization request** through the gateway and acquirer toward the issuer. During that authorization, the issuer may need to **authenticate** the cardholder first (strong customer authentication / SCA—e.g. 3-D Secure, bank app, OTP) before approving. The outcome is typically structured data (e.g. CAVV, ECI) the issuer uses with funds and risk checks to **approve or decline** the transaction. If approved, the issuer places an **authorization hold**. A hold confirms availability and (when SCA ran) payer intent; it still does **not** pay the merchant. Funding follows **capture** and **settlement**.
+Payment initiation is the merchant starting an authorization: assemble amount, currency, merchant identifiers, and card details, and send the **authorization request** through the gateway and acquirer toward the issuer. During that authorization, the issuer may need to **authenticate** the cardholder first (strong customer authentication / SCA — e.g. 3-D Secure, bank app, OTP) before approving. The outcome is typically structured data (e.g. CAVV, ECI) the issuer uses with funds and risk checks to **approve or decline** the transaction. If approved, the issuer places an **authorization hold**. A hold confirms availability and (when SCA ran) payer intent; it does not pay the merchant. Funding follows **capture** and **settlement**.
 
 ```mermaid
 sequenceDiagram
@@ -156,7 +156,7 @@ sequenceDiagram
 ```
 
 ### Dispute / Chargeback
-Unlike refunds, **disputes** start when the **cardholder** challenges the charge with the **issuer**. The issuer opens a **chargeback** (or similar) case, and the acquirer and merchant exchange evidence under **scheme** rules and timelines. Outcomes can reverse or adjust what was settled—so "payment succeeded" in an API is not always the end of **operational risk**.
+Unlike refunds, **disputes** start when the **cardholder** challenges the charge with the **issuer**. The issuer opens a **chargeback** (or similar) case, and the acquirer and merchant exchange evidence under **scheme** rules and timelines. Outcomes can reverse or adjust what was settled — so "payment succeeded" in an API is not always the end of **operational risk**.
 
 ```mermaid
 sequenceDiagram
@@ -241,17 +241,17 @@ These **business patterns** describe how **Phase 2** legs are labeled for scheme
 |------|--------|
 | **Card on file (CoF)** | Umbrella: the card is **stored** (as a token) for later use. Does not by itself mean subscription. |
 | **Subscription** | **Scheduled** charges (e.g. monthly fee): MIT with a **recurring** indicator; amount may be fixed or variable per your agreement. |
-| **Unscheduled card on file (UCOF)** | Industry label for **merchant-initiated** charges **without** a fixed schedule—e.g. metered use, top-ups, “charge when balance low.” Mastercard uses “UCOF”; Visa’s aligned category is “Unscheduled Credential on File” (same acronym). Still requires valid prior **CIT** agreement from Phase 1. |
+| **Unscheduled card on file (UCOF)** | Industry label for **merchant-initiated** charges **without** a fixed schedule — e.g. metered use, top-ups, “charge when balance low.” Mastercard uses “UCOF”; Visa’s aligned category is “Unscheduled Credential on File” (same acronym). Still requires valid prior **CIT** agreement from Phase 1. |
 
 ## Local Payment Methods
 
-For local payment methods (LPMs), the **ecosystem and lifecycle are largely the same** as cards: similar participants and the same high-level phases—initiate, confirm, collect funds, reconcile, and handle refunds and problems. The **differences are in the details**—who plays each role, how authorization is triggered, and how refunds and disputes work. 
+For local payment methods (LPMs), the **ecosystem and lifecycle are largely the same** as cards: similar participants and the same high-level phases — initiate, confirm, collect funds, reconcile, and handle refunds and problems. The **differences are in the details** — who plays each role, how authorization is triggered, and how refunds and disputes work. 
 
 ### Ecosystem and Lifecycle at a Glance
 
-At a high level, LPMs replace cards' **single global scheme layer** with **national or regional operators**—e.g. PIX (BCB, Brazil), UPI (NPCI, India), SEPA CT / SDD (EPC), iDEAL (Currence / EPI), BLIK (Poland), Swish, Bizum, FPS, PayNow, PromptPay—each with its own rules, settlement, and dispute framework. Some LPMs are genuinely **bank-led**, **wallet- or platform-led**, or **bilateral**, with no scheme analog at all. As a result, you cannot assume one global rulebook the way you can with Visa or Mastercard, and the issuer/acquirer duality often collapses into a single bank role.
+At a high level, LPMs replace cards' **single global scheme layer** with **national or regional operators** — e.g. PIX (BCB, Brazil), UPI (NPCI, India), SEPA CT / SDD (EPC), iDEAL (Currence / EPI), BLIK (Poland), Swish, Bizum, FPS, PayNow, PromptPay — each with its own rules, settlement, and dispute framework. Some LPMs are genuinely **bank-led**, **wallet- or platform-led**, or **bilateral**, with no scheme analog at all. As a result, you cannot assume one global rulebook the way you can with Visa or Mastercard, and the issuer/acquirer duality often collapses into a single bank role.
 
-The lifecycle shape shifts accordingly: **authorization is frequently push-based** (shopper-pushed from their bank or app) rather than pull-based, and **refund/dispute frameworks are usually weaker** than the card chargeback system. Stored-instrument flows also look different—there is no global "PAN token" equivalent, so **Phase 2** (reusing a saved instrument) only exists where the rail supports **standing mandates** or **billing agreements** for repeat or merchant-initiated collection, and behavior stays **method- and country-specific** rather than a single stored-credential framework.
+The lifecycle shape shifts accordingly: **authorization is frequently push-based** (shopper-pushed from their bank or app) rather than pull-based, and **refund/dispute frameworks are usually weaker** than the card chargeback system. Stored-instrument flows also look different — there is no global "PAN token" equivalent, so **Phase 2** (reusing a saved instrument) only exists where the rail supports **standing mandates** or **billing agreements** for repeat or merchant-initiated collection, and behavior stays **method- and country-specific** rather than a single stored-credential framework.
 
 ### Summary of Differences
 
@@ -261,13 +261,13 @@ The table below consolidates the card baseline and typical LPM behavior across t
 |--------|----------------|------------------------------|
 | **Who "owns" the user account** | Issuer holds the card account; network rules standardize messaging. | Often a bank, wallet, or local operator; rarely a separate “scheme” you integrate against directly. |
 | **Authorization path** | Real-time approve/decline on a shared rail (network + issuer). | May be synchronous, or **pending** until the shopper completes a bank login, transfer, QR scan, or store payment. |
-| **Credential** | PAN + expiry (often tokenized); strong customer authentication when required. | Bank redirect, IBAN, mobile number, voucher code, QR—method-specific. |
+| **Credential** | PAN + expiry (often tokenized); strong customer authentication when required. | Bank redirect, IBAN, mobile number, voucher code, QR — method-specific. |
 | **Settlement and clearing** | Highly standardized batch clearing between banks via the network. | May be instant push, batched bank transfer, or cash-agent settlement; reconciliation fields differ. |
 | **Refunds and disputes** | Chargeback framework is mature and standardized; evidence windows are strict. | Refund support ranges from full to limited or manual; "dispute" may be a support ticket rather than a scheme chargeback. |
 | **Merchant integration** | One mental model (auth/capture/refund) maps across many regions if the PSP abstracts schemes. | More one-off behaviors: expiry of payment codes, offline confirmation, different webhook semantics. |
-| **Saved “token” / instrument id** | **Network** or **PSP token** mapping to PAN. | **Vault payment-method id**, mandate reference, wallet handle—**not** a card PAN token. |
+| **Saved “token” / instrument id** | **Network** or **PSP token** mapping to PAN. | **Vault payment-method id**, mandate reference, wallet handle — **not** a card PAN token. |
 
-Cards are not universally "better"; they are a **shared rail with predictable roles**. LPMs trade that uniformity for **local reach, lower cost in some markets, or shopper preference**—at the cost of more asynchronous states and method-specific operational playbooks. The next section introduces payment capabilities as the common lens for comparing methods despite these differences.
+Cards are not universally "better"; they are a **shared rail with predictable roles**. LPMs trade that uniformity for **local reach, lower cost in some markets, or shopper preference** — at the cost of more asynchronous states and method-specific operational playbooks. The next section introduces payment capabilities as the common lens for comparing methods despite these differences.
 
 ## Payment Capabilities
 
@@ -277,11 +277,11 @@ Reliability here means predictable **semantics** (what a call does and does not 
 
 Typical capabilities and the reliability problem each one addresses:
 
-- **Authorize**: Reserve funds or confirm intent **before** final collection, so checkout can commit without immediately moving money; must pair with clear outcomes and holds that match issuer behavior.
-- **Capture**: Collect funds (full or partial, when supported) **after** authorization or confirmation, aligned with fulfillment; reliability requires amount rules, timing, and idempotency when submission retries.
-- **Cancel / void**: Release an authorization or cancel a still-cancellable payment so **no stray capture** and no ambiguous “half-open” state between order and rail.
+- **Authorize**: Reserve funds or confirm intent before final collection, so checkout can commit without immediately moving money. Reliability requires clear outcomes and holds that match issuer behavior.
+- **Capture**: Collect funds (full or partial, where supported) after authorization or confirmation, aligned with fulfillment. Reliability requires amount rules, timing discipline, and idempotency on retries.
+- **Cancel / void**: Release an authorization or cancel a still-cancellable payment so no stray capture happens and no ambiguous "half-open" state sits between the order system and the rail.
 - **Refund**: Return money after a successful collection with traceable linkage to the original payment; reliability depends on partial refunds, cutoffs, and consistent final states.
-- **Status check (query/retrieve)**: Read the **current** state (`pending`, `authorized`, `captured`, `failed`, `canceled`, `refunded`, …) when the UI session, webhooks, or clocks do not give a single synchronous answer—essential whenever phases complete **asynchronously**.
+- **Status check (query / retrieve)**: Read the current state (`Pending`, `Authorized`, `Captured`, `Failed`, `Canceled`, `Refunded`, …) when the UI session, webhooks, or clocks do not give a single synchronous answer — essential whenever phases complete **asynchronously**.
 - **Tokenize / save payment credential**: Create and store a reusable token (or saved instrument id) without retaining raw credential data; reliability requires clear scope, lifecycle controls, and deterministic token-to-instrument linkage.
 - **Charge with saved token (CIT/MIT)**: Reuse a stored token for subsequent payments, with explicit initiator classification (**customer-initiated** vs **merchant-initiated**) and correct category indicators (for example recurring or unscheduled) to avoid issuer ambiguity.
 - **Stored agreement / mandate lifecycle**: Record, retrieve, update, and revoke shopper consent (or mandate) for repeat charging, so token reuse remains auditable and compliant across renewals, retries, and cancellations.
