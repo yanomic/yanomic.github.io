@@ -156,11 +156,63 @@ stateDiagram-v2
 
 ## Capture
 
-- **Semantics** — convert a prior authorization into a **collectable transaction** by instructing the acquirer to present it into clearing. Supports **full capture**, **partial capture**, and on some rails **multiple captures** against the same authorization. Capture decides what is owed; it is not settlement.
-- **State model** — `authorized` → `capture_requested` → (`captured` | `capture_failed`). Partial captures produce per-capture substates and a remaining authorized amount that can drain to zero or expire. Some LPMs skip this step entirely — authorization and capture collapse into a single `paid` state.
-- **Recovery** — idempotent on a **capture reference** so retries do not double-capture. Partial capture overruns (capturing more than authorized) must fail deterministically, not silently widen. If the authorization expired before capture, the rail-specific recovery is either **re-authorization** (fresh SCA where needed) or **refund** after a force-capture, depending on issuer rules.
-- **Time discipline** — the **capture window** is rail- and contract-specific (typical cards: 7 days; lodging/auto-rental: longer by agreement; many LPMs: immediate-only). Late captures degrade interchange, raise decline risk on delayed-capture representment, and can be rejected outright.
-- **Observability** — webhook on `captured` and `capture_failed`; status query exposing authorized vs. captured amounts and remaining balance; capture line items on the daily settlement report as the final reconciliation source.
+Capture is the instruction that turns an authorization into money the merchant will actually receive. **Whether it is a separate call at all depends on the rail's message model.** The card industry names the split directly:
+
+- **Single-Message System (SMS)** — also called `sale` or `purchase` — folds authorization and clearing into a single message, and there is no separate capture instruction.
+- **Dual-Message System (DMS)** — `auth + capture`, sometimes labelled **two-step** in PSP documentation — reserves funds first and requires a separate capture call to push the transaction into clearing.
+
+Most card credit traffic is DMS; PIN debit and many regional debit schemes default to SMS.
+
+LPMs do not share a formal label, but the same split shows up in their flows. The majority — **PIX**, **iDEAL**, **Bancontact**, **UPI**, **Swish**, **BLIK**, **Alipay**, **WeChat Pay** — are SMS-equivalent: when the rail confirms the shopper's action, funds are already moving and the Capture capability is a no-op. **Vouchers and offline-confirmation LPMs** — **Boleto**, **OXXO**, **Konbini**, **cash on delivery** — are DMS-equivalent: authorization issues a reference, and a separate confirmation (a capture call, or in some cases a settlement-side credit notice) lands once the shopper completes the off-rail step.
+
+The remainder of this section addresses the **DMS** case. On SMS rails the Capture capability is still exposed on the API surface — so a single integration can drive both message models — but the call is a **no-op**: no clearing instruction is dispatched to the rail, and the state machine below transitions directly to `Captured` once authorization succeeds.
+
+### Individual vs Batch Capture
+
+Even on rails that require an explicit capture, there are two operational shapes the merchant can choose between:
+
+- **Individual capture, after a delay** — the merchant issues a **per-authorization capture call** as soon as the underlying obligation is fulfilled. The delay between authorize and capture ranges from minutes to days, bounded by the rail's **capture window** (typically 7 days on cards, extended to around 30 days for travel and lodging by scheme agreement). Examples: an e-commerce shop captures when the warehouse hands the order to the carrier (capture-on-shipment, also encouraged by scheme rules); a hotel captures at check-out for the final stay total, after one or more **incremental authorizations** along the way to extend the hold and adjust the running amount; a car-rental company captures when the vehicle is returned and incidentals are reconciled; a marketplace captures the buyer's authorization once the seller marks the order shipped.
+- **Batch capture, at cutoff** — the merchant accumulates authorizations and submits them as a single file at the acquirer's **clearing cutoff** (typically end-of-day in the acquirer's local time). This is the legacy default — card-present terminals batch-settled this way long before online auth APIs existed — and remains standard for high-volume backend flows. Some acquirers extend the model with **auto-capture at cutoff**, sweeping any authorization the merchant has neither captured nor cancelled into the batch; convenient, but it surrenders the merchant's deadline as a control. 
+  
+Modern PSPs more commonly expose a **hybrid**: per-authorization capture calls at the API surface, internally aggregated into a single submission at the acquirer's cutoff, preserving per-call observability while the rail still receives one batch. Examples: a card-present POS batch-settling at close-of-business; a transit operator aggregating a rider's same-day taps into a single **fare-capped** capture once the day's pattern is known; a subscription platform submitting a daily batch of MIT renewal captures.
+
+### Capture Variants
+
+Independent of the timing model above, capture supports several amount variants beyond a full one-shot capture, all subject to rail- and scheme-specific rules. **Partial capture** sends less than the authorized amount (out-of-stock line item, shortened hotel stay) and releases the unused balance back to the issuer. **Multiple captures** apply several captures against the same authorization with the cumulative sum capped at the authorized total (split-shipment orders, multi-seller marketplace fulfillment); not every rail supports it. **Over-capture** — capturing above the authorized amount — is permitted by the card schemes only within narrow tolerance bands and only for specific MCCs (lodging, car rental, restaurants for tip-and-gratuity, food delivery for tip adjustment); outside those bands the merchant must re-authorize for the higher amount. **Force capture** — capturing without a matching live authorization — exists for offline-terminal recovery on cards, but is disallowed or heavily scrutinized by most acquirers because of elevated chargeback risk.
+
+On SMS rails these variants do not apply natively — capture is the authorization — so the equivalent business outcomes are achieved through **separate transactions** (split-shipment), **refunds** (over-billing), and rail-specific exceptions like **PIN-debit tip adjustment**, the only place an SMS clearing message gets re-amounted after the fact.
+
+### Capture State Machine
+
+Capture is **asynchronous on every DMS rail**. The acquirer accepts the capture instruction, schedules it into a clearing window, and confirms the outcome later — often via webhook hours after submission, and on batch flows only after the acquirer has processed the batch. Every robust integration therefore treats a capture as its own stateful object, distinct from the parent authorization.
+
+> **Note on PSP API surfaces:** Some modern PSP APIs return a synchronous *captured* response by resolving optimistically on acquirer-acceptance rather than scheme-clearing. The underlying clearing is still asynchronous, and the merchant's reconciliation must treat it as such — a synchronous API result is not a substitute for the settlement record.
+
+The states a capture moves through:
+
+- **`CaptureReceived`** — the only non-terminal state. The capture has been accepted by the acquirer (individually or as part of a batch) and is in flight toward clearing.
+- **`Captured`** — clearing accepted the capture. The amount is now owed to the merchant and will surface on the next settlement cycle.
+- **`CaptureFailed`** — clearing refused the capture. Common causes: the underlying authorization expired before the capture reached the rail, the capture amount exceeded the authorized amount, the issuer revoked the hold, or scheme rules rejected the late presentment. Distinct from `CaptureError` because clearing actually decided.
+- **`CaptureError`** — the capture could not be carried through cleanly: connectivity loss with the acquirer, malformed batch file, signature mismatch, or unrecoverable downstream errors. No party decided; the system failed to deliver the instruction. Resolved via **status query** and idempotent replay on the same capture reference.
+
+```mermaid
+stateDiagram-v2
+    [*] --> CaptureReceived: capture submitted (individual or batched)
+    CaptureReceived --> Captured: clearing accepts
+    CaptureReceived --> CaptureFailed: clearing refuses
+    CaptureReceived --> CaptureError: technical failure
+    Captured --> [*]
+    CaptureFailed --> [*]
+    CaptureError --> [*]
+```
+
+### The Five Lenses
+
+- **Semantics** — convert a prior authorization into a **collectable transaction** by instructing the acquirer to present it into clearing. Required on DMS rails (cards in their dual-message configuration, vouchers, offline-confirmation LPMs); implicit and no-op on SMS rails (PIN-debit card schemes, most LPMs). Supports **full**, **partial**, and on some rails **multiple captures** against the same authorization. Capture decides what is owed; it is not settlement.
+- **State model** — one in-flight state (`CaptureReceived`) and three terminal outcomes: `Captured`, `CaptureFailed`, `CaptureError`. Partial captures produce per-capture instances and a remaining authorized balance that drains to zero or expires with the parent authorization.
+- **Recovery** — idempotent on a **capture reference** so retries do not double-capture. After a `CaptureError`, the safe primitive is **status query** on the capture reference followed by a replay using the same idempotency key — never a blind retry, which risks a double-capture if the original instruction reached the rail. Partial-capture overruns must fail deterministically, not silently widen.
+- **Time discipline** — the **capture window** is rail- and contract-specific (typical cards: 7 days; lodging / auto-rental: longer by agreement; many LPMs: immediate-only). Late captures carry both cost and decline risk: they trigger **interchange downgrades** into higher-rate categories, increase the likelihood of an **issuer decline at clearing** as the original authorization ages, and are rejected as `CaptureFailed` once the window has elapsed. At that point the capture's lifecycle is terminally closed, and the merchant must return to **Authorize** (with fresh SCA where required) before any collection is possible. Batch flows add a second clock — the acquirer's **clearing cutoff** — that determines which day's settlement a capture lands in.
+- **Observability** — webhook on every transition (`Captured`, `CaptureFailed`, `CaptureError`); status query exposing authorized vs. captured amounts and remaining balance; capture line items on the daily settlement report as the final reconciliation source. For batch flows, a **batch acknowledgement** linking each capture line to its enclosing batch is required — without it, individual `CaptureError` causes are invisible inside an otherwise-accepted batch.
 
 ## Cancel / Void
 
