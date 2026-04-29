@@ -32,7 +32,7 @@ Card payments are a useful reference because the roles are well defined and the 
 - **Acquirer** (merchant bank): Underwrites the merchant, routes authorization and capture messages, receives settlement from the card network, and credits the merchant (minus fees). 
 - **Scheme** (Card network): Visa, Mastercard, and others. Sets rules, routes messages between acquirer and issuer, and operates clearing and often parts of dispute handling. Networks do not hold the cardholder's money; they coordinate messaging and settlement between banks.
 - **Issuer** (cardholder bank): Issues the card, approves or declines authorization based on risk and available funds, posts charges to the cardholder, and participates in clearing, settlement, and disputes on the cardholder side.
-- **Gateway / PSP** (optional but common): Aggregates many merchants, offers a single API, tokenization, fraud tools, and connectivity to one or more acquirers. From the merchant's perspective, the gateway is often the primary integration surface even though settlement still runs through acquirer–network–issuer rails. In modern integrations the gateway and PSP are often the same product (e.g. Stripe, Adyen, Checkout.com), so for brevity we treat them as one role throughout.
+- **Gateway / PSP** (optional but common): A **gateway** is primarily the technical integration layer — API surface, request orchestration, tokenization, and routing to one or more acquirers. A **PSP** usually includes that gateway layer plus broader commercial and operational scope: merchant onboarding support, risk/fraud operations, reconciliation/reporting tooling, and sometimes settlement or payout services. From the merchant's perspective, this layer is often the primary integration surface even though settlement still runs through acquirer-network-issuer rails. In this series, we use gateway and PSP interchangeably for readability, unless a section needs the distinction explicitly.
 
 With the parties in place, the same transaction flows through a sequence of well-defined phases. The sections below walk through each one in order.
 
@@ -86,105 +86,31 @@ sequenceDiagram
     G->>Mer: Authorized or declined
 ```
 
-### Post-authorization operations
+### Capture
+The merchant (or automated rules) sends **capture** instructions for all or part of the authorized amount. The acquirer presents those transactions into **clearing**: the scheme exchanges clearing records with the issuer so the charge can be posted to the cardholder. Capture is about what is owed and **moving the transaction into clearing**; it is still distinct from **settlement**, where money actually moves between banks.
 
-#### Capture
-The merchant (or automated rules) sends **capture** instructions for all or part of the authorized amount. The acquirer **presents** those transactions into clearing: the scheme exchanges clearing records with the issuer so the charge can be posted to the cardholder. Capture is about what is owed and **moving the transaction into clearing**; it is still distinct from **settlement**, where money actually moves between banks.
+### Cancel
+If the merchant will not capture — order canceled, inventory unavailable, or duplicate auth — they **cancel** the authorization while it is still valid. The acquirer asks the issuer to **release the hold**; no capture means no clearing/settlement for that authorization. Naming varies by provider (`void`, `cancel`, `reverse`); the idea is the same: end the hold without taking money.
 
-```mermaid
-sequenceDiagram
-    participant Mer as Merchant
-    participant Acq as Acquirer
-    participant Sch as Scheme
-    participant Iss as Issuer
-    Mer->>Acq: Capture instruction (full or partial)
-    Acq->>Sch: Clearing / presentment
-    Sch->>Iss: Clearing records
-    Iss->>Iss: Post charge to cardholder
-```
-
-#### Cancel
-If the merchant will not capture — order canceled, inventory unavailable, or duplicate auth — they **void** or **cancel** the authorization while it is still valid. The acquirer asks the issuer to **release the hold**; no capture means no clearing/settlement for that authorization. Naming varies by provider (`void`, `cancel`, `reverse authorization`); the idea is the same: end the hold without taking money.
-
-```mermaid
-sequenceDiagram
-    participant Mer as Merchant
-    participant G as Gateway / PSP
-    participant Acq as Acquirer
-    participant Sch as Scheme
-    participant Iss as Issuer
-    participant Ch as Cardholder
-    Mer->>G: Void / cancel authorization
-    G->>Acq: Forward reversal
-    Acq->>Sch: Authorization reversal
-    Sch->>Iss: Release hold
-    Iss->>Ch: Hold removed from available balance
-    Iss->>Sch: OK
-    Sch->>Acq: Reversal confirmed
-    Acq->>G: Canceled / voided
-    G->>Mer: Final status
-```
-
-#### Refund
-Refunds return money to the cardholder after a successful capture. They are initiated on the **merchant/acquirer** side and ride the card rails as a **credit**; timing, partial refunds, and cutoffs depend on network and issuer rules.
-
-```mermaid
-sequenceDiagram
-    participant Mer as Merchant
-    participant Acq as Acquirer
-    participant Sch as Scheme
-    participant Iss as Issuer
-    participant Ch as Cardholder
-    Mer->>Acq: Refund request
-    Acq->>Sch: Credit / refund message
-    Sch->>Iss: Post credit
-    Iss->>Ch: Cardholder sees credit
-```
+### Refund
+Refunds return money to the cardholder after a successful capture. Operationally, the merchant submits a refund against an existing cleared payment (full or partial), the acquirer validates amount and eligibility, and then sends a credit message through the scheme to the issuer. The issuer posts the credit to the cardholder statement, usually asynchronously from the API response, so merchant systems must track both acceptance and final posting; timing, cutoff behavior, and posting speed remain network- and issuer-dependent.
 
 ### Settlement
 After clearing, **interbank settlement** nets obligations between issuer and acquirer according to the scheme's arrangements. Separately, the **acquirer settles to the merchant**: payout timing, reserves, and fees are defined in the merchant's contract. The scheme orchestrates settlement between issuer and acquirer; it does not replace the acquirer's merchant payout.
 
-```mermaid
-sequenceDiagram
-    participant Iss as Issuer
-    participant Sch as Scheme
-    participant Acq as Acquirer
-    participant Mer as Merchant
-    Note over Iss,Sch: Net settlement of cleared obligations
-    Iss->>Sch: Member settlement leg
-    Sch->>Acq: Member settlement leg
-    Acq->>Mer: Merchant payout per contract
-```
-
-### Dispute / Chargeback
-Unlike refunds, **disputes** start when the **cardholder** challenges the charge with the **issuer**. The issuer opens a **chargeback** (or similar) case, and the acquirer and merchant exchange evidence under **scheme** rules and timelines. Outcomes can reverse or adjust what was settled — so "payment succeeded" in an API is not always the end of **operational risk**.
-
-```mermaid
-sequenceDiagram
-    participant Ch as Cardholder
-    participant Iss as Issuer
-    participant Sch as Scheme
-    participant Acq as Acquirer
-    participant Mer as Merchant
-    Ch->>Iss: Dispute transaction
-    Iss->>Sch: Chargeback / dispute case
-    Sch->>Acq: Notify acquirer
-    Acq->>Mer: Evidence request / debit notice
-    Mer->>Acq: Evidence or accept outcome
-    Acq->>Sch: Represent / outcome
-    Sch->>Iss: Final disposition
-```
+### Dispute
+Unlike refunds, **disputes** start from the cardholder side: the **cardholder** challenges the charge with the **issuer**, which opens a **chargeback** (or similar) case. The acquirer and merchant then follow a scheme-defined evidence process with fixed timelines. 
 
 ### Tokenization
 The lifecycle above focuses on a **one-off** payment path. This section extends that model to **stored-instrument** journeys, where a payment credential is saved first and then referenced in later transactions. This extension is easiest to read as **two connected phases**: 
 
-1. **Token creation** — in an in-session checkout, the PSP provisions a reusable token bound to the underlying payment credential.
-2. **Subsequent charge** — later authorizations reference that saved token, often without the cardholder present.
+1. **Token creation** — in a **shopper-present** checkout, the payment credential is tokenized and saved for later reuse.
+2. **Subsequent charge** — later authorizations reference that saved token, often as **shopper-not-present** transactions.
 
 
 #### Phase 1: Token Creation
 
-Phase 1 is a **customer-initiated transaction (CIT)**. Provisioning and consent are handled within the same checkout flow: the cardholder supplies card details, and the **gateway / PSP** calls a **token vault** or **network tokenization** service to create a token bound to that credential. In the same CIT flow, the shopper accepts terms to save the card, completes **SCA** when required, and the authorization carries the needed **stored credential** indicators.
+Phase 1 is a **customer-initiated transaction (CIT)**. Provisioning and consent are handled within the same checkout flow: the cardholder supplies card details, and the **gateway / PSP** requests tokenization. Depending on the model, the token is provisioned either by the PSP vault or by the payment-method side (network/issuer token service), then bound to the underlying payment credential. In that same CIT flow, the shopper accepts terms to save the card, completes **SCA** when required, and the authorization carries the needed **stored credential** indicators.
 
 ```mermaid
 sequenceDiagram
@@ -234,7 +160,7 @@ sequenceDiagram
     G->>Mer: Final status
 ```
 
-#### MIT Classification
+##### MIT Classification
 
 These **business patterns** describe how **Phase 2** legs are labeled for schemes; they mostly apply when the merchant **initiates** the charge:
 
@@ -286,18 +212,7 @@ Those five lenses are worth defining once up front, because what differs across 
 
 Comparing methods is therefore not just about whether a capability exists, but whether it behaves consistently under retries, asynchronous flows, deadline pressure, and failure. This is why a common capability model helps compare rails on equal footing while preserving method-specific behavior.
 
-Typical capabilities and the reliability problem each one addresses:
-
-- **[Onboarding]({{< ref "2026-04-21-payment-capability-onboarding" >}})**: Establish merchant identity, permitted scope (brands, MCCs, countries), and technical channels before any transaction flows can begin.
-- **[Authorize]({{< ref "2026-04-23-payment-capability-authorize" >}})**: Reserve funds or confirm intent as the entry point into transaction lifecycle state.
-- **[Cancel]({{< ref "2026-04-24-payment-capability-cancel" >}})**: Release an active authorization hold before clearing is accepted (DMS-only; no money movement).
-- **[Capture]({{< ref "2026-04-25-payment-capability-capture" >}})**: Convert authorization into collectable funds; supports timing and amount variants where the rail allows.
-- **[Refund]({{< ref "2026-04-26-payment-capability-refund" >}})**: Return money after clearing; universal undo path when cancel is unavailable or too late.
-- **[Tokenization]({{< ref "2026-04-27-payment-capability-tokenize" >}})**: Create and manage reusable payment credentials, including charging with saved tokens (`CIT/MIT`) and mandate/agreement lifecycle for recurring or merchant-initiated collection.
-- **[Dispute / chargeback]({{< ref "2026-04-28-payment-capability-dispute-chargeback" >}})**: Receive cases, submit evidence, and track representment outcomes under rail rules.
-- **[Settlement / payout]({{< ref "2026-04-29-payment-capability-settlement-payout" >}})**: Observe and reconcile net funds movement from captures, refunds, fees, and adjustments.
-
 ## Closing
 
-This chapter establishes the lifecycle and capability vocabulary used throughout the rest of the series. Each linked chapter goes deeper on one phase, using the same five-lens frame so differences across rails are explicit and comparable.
+This chapter establishes the lifecycle and capability vocabulary used throughout the rest of the series. In the following chapters, we will go capability by capability and propose an ideal merchant-facing protocol by comparing how major PSP APIs model each operation: [Stripe](https://docs.stripe.com/api), [Adyen](https://docs.adyen.com/api-explorer/), [Antom](https://docs.antom.com/ac/ams/api), [Airwallex](https://www.airwallex.com/docs/api), [Checkout.com](https://api-reference.checkout.com/), [Worldpay](https://docs.worldpay.com/access/products/payments/), and [Worldline](https://docs.connect.worldline-solutions.com/documentation/api/).
 
