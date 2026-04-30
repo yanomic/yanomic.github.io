@@ -8,6 +8,12 @@ alwaysApply: true
 
 Yanomic blog posts read as professional technical reference writing — dense, opinionated, and accurate. Apply the following when drafting or editing any blog under `content/blogs/`.
 
+## Editorial standard
+
+- **Coherent.** Sections support a single arc; transitions state why the next block matters. Claims and examples do not contradict earlier wording unless the post explicitly revises a definition.
+- **Consistent.** Once you introduce a term for a concept, keep using it for that concept through the post (or map synonyms once, then commit). Parallel sections use parallel structure where it helps comparison.
+- **Natural but professional.** Prefer plain, precise wording and sentences a skilled practitioner would actually say aloud; avoid stiff filler, cocktail rhetoric, and chatty hedges. The tone stays reference-grade, not casual blogging.
+
 ## Tone
 
 - **Direct, not obscure.** The reader should grasp the meaning on first pass. Lead with the claim, not the build-up. Name actors, verbs, and objects concretely. One claim per sentence — split when a sentence runs three independent clauses.
@@ -34,7 +40,8 @@ Yanomic blog posts read as professional technical reference writing — dense, o
 
 - Bullet glyph: `-` (hyphen). Never `*`.
 - `vs` without a period.
-- Em-dash (`—`) for parenthetical clauses, never double hyphens.
+- **Colon over em-dash for term + gloss.** When a bold label introduces its definition or gloss — especially in glossary-style bullets (e.g. Five Lenses, metric names) — use a **colon**: `**Semantics**:` … Do **not** use an em-dash between label and gloss (`**Semantics** —` …). Reserve the em-dash for true parenthetical interruptions in running prose (see below).
+- Em-dash (`—`) for parenthetical clauses in flowing sentences where substituting a colon would break grammar or mislead; never double hyphens.
 - Bold (`**`) only for keyword introductions and named concepts; never for emphasis-emphasis.
 - Backticks for state names, status values, and API field names.
 - No trailing semicolons connecting bullet items; each bullet ends with a full stop.
