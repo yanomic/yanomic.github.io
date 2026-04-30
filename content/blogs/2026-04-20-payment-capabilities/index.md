@@ -35,7 +35,7 @@ Card payments are a useful reference because the roles are well defined and the 
 With the parties in place, the same transaction flows through a sequence of well-defined phases. The sections below walk through each one in order.
 
 ### Onboarding
-The merchant (optionally via PSP) onboards with an acquirer: KYC, pricing, MCC, and technical connectivity. The acquirer underwrites the merchant against **scheme rules**: PCI, branding, permitted category use, and cardholder-data handling. In the usual path the **acquirer** validates and approves the application (a **PSP** may handle operations in front of the acquirer). Direct scheme approval is the exception: some programs, high-risk categories, or network registration require the acquirer to file with the scheme, which then accepts or declines. **The cardholder is not involved**; onboarding only establishes what the merchant may initiate later at checkout.
+The merchant (optionally via PSP) onboards with an acquirer: KYC, pricing, MCC, and technical connectivity. The acquirer underwrites the merchant against **scheme rules**: PCI, branding, permitted category use, and cardholder-data handling. In the usual path the **acquirer** validates and approves the application (a **PSP** may handle operations in front of the acquirer). Direct scheme approval is the exception: some programs, high-risk categories, or network registration require the acquirer to file with the scheme, which then accepts or declines. **The cardholder is usually not directly involved**; onboarding primarily establishes what the merchant may initiate later at checkout, though some programs add end-user consent or compliance controls for stored-credential use cases.
 
 ```mermaid
 sequenceDiagram
@@ -52,7 +52,7 @@ sequenceDiagram
 ```
 
 ### Authorization
-Payment initiation is the merchant starting an authorization: assemble amount, currency, merchant identifiers, and card details, and send the **authorization request** through the gateway and acquirer toward the issuer. During that authorization, the issuer may need to **authenticate** the cardholder first (strong customer authentication / SCA — e.g. 3-D Secure, bank app, OTP) before approving. The outcome is typically structured data (e.g. CAVV, ECI) the issuer uses with funds and risk checks to **approve or decline** the transaction. If approved, the issuer places an **authorization hold**. A hold confirms availability and (when SCA ran) payer intent; it does not pay the merchant. Funding follows **capture** and **settlement**.
+Payment initiation is the merchant starting an authorization: assemble amount, currency, merchant identifiers, and card details, and send the **authorization request** through the gateway and acquirer toward the issuer. During that authorization, the issuer may need to **authenticate** the cardholder first (strong customer authentication / SCA — e.g. 3-D Secure flows, in-app banking approval, OTP, biometrics, or hardware-token factors) before approving. The outcome is typically structured data (e.g. CAVV, ECI) the issuer uses with funds and risk checks to **approve or decline** the transaction. If approved, the issuer places an **authorization hold**. A hold confirms availability and (when SCA ran) payer intent; it does not pay the merchant. Funding follows **capture** and **settlement**.
 
 ```mermaid
 sequenceDiagram
@@ -88,13 +88,13 @@ sequenceDiagram
 The merchant (or automated rules) sends **capture** instructions for all or part of the authorized amount. The acquirer presents those transactions into **clearing**: the scheme exchanges clearing records with the issuer so the charge can be posted to the cardholder. Capture is about what is owed and **moving the transaction into clearing**; it is still distinct from **settlement**, where money actually moves between banks.
 
 ### Cancel
-If the merchant will not capture — order canceled, inventory unavailable, or duplicate auth — they **cancel** the authorization while it is still valid. The acquirer asks the issuer to **release the hold**; no capture means no clearing/settlement for that authorization. Naming varies by provider (`void`, `cancel`, `reverse`); the idea is the same: end the hold without taking money.
+If the merchant will not capture — order canceled, inventory unavailable, or duplicate auth — they issue **Cancel** while the authorization is still valid. The acquirer asks the issuer to **release the hold**; no capture means no clearing/settlement for that authorization.
 
 ### Refund
 Refunds return money to the cardholder after a successful capture. Operationally, the merchant submits a refund against an existing cleared payment (full or partial), the acquirer validates amount and eligibility, and then sends a credit message through the scheme to the issuer. The issuer posts the credit to the cardholder statement, usually asynchronously from the API response, so merchant systems must track both acceptance and final posting; timing, cutoff behavior, and posting speed remain network- and issuer-dependent.
 
 ### Settlement
-After clearing, **interbank settlement** nets obligations between issuer and acquirer according to the scheme's arrangements. Separately, the **acquirer settles to the merchant**: payout timing, reserves, and fees are defined in the merchant's contract. The scheme orchestrates settlement between issuer and acquirer; it does not replace the acquirer's merchant payout.
+After clearing, **interbank settlement** moves net obligations between issuer and acquirer according to scheme arrangements. Separately, the **acquirer settles to the merchant**: payout timing, reserves, and fees are defined in the merchant's contract. Keep these as two distinct layers: scheme-level interbank clearing/settlement vs merchant-facing acquirer payout. The scheme orchestrates the former; it does not replace the latter.
 
 ### Dispute
 Unlike refunds, **disputes** start from the cardholder side: the **cardholder** challenges the charge with the **issuer**, which opens a **chargeback** (or similar) case. The acquirer and merchant then follow a scheme-defined evidence process with fixed timelines.
@@ -174,9 +174,9 @@ For local payment methods (LPMs), the **ecosystem and lifecycle are largely the 
 
 ### Ecosystem and Lifecycle at a Glance
 
-At a high level, LPMs replace cards' **single global scheme layer** with **national or regional operators** — e.g. PIX (BCB, Brazil), UPI (NPCI, India), SEPA CT / SDD (EPC), iDEAL (Currence / EPI), BLIK (Poland), Swish, Bizum, FPS, PayNow, PromptPay — each with its own rules, settlement, and dispute framework. Some LPMs are genuinely **bank-led**, **wallet- or platform-led**, or **bilateral**, with no scheme analog at all. As a result, you cannot assume one global rulebook the way you can with Visa or Mastercard, and the issuer/acquirer duality often collapses into a single bank role.
+At a high level, LPMs replace cards' **single global scheme layer** with **national or regional operators** — e.g. PIX (BCB, Brazil), UPI (NPCI, India), SEPA CT / SDD (EPC), iDEAL (Currence / EPI), BLIK (Poland), Swish, Bizum, FPS, PayNow, PromptPay — each with its own rules, settlement, and dispute framework. Many of these operators function as **local scheme analogs**, while some flows are more directly **bank-led**, **wallet- or platform-led**, or **bilateral**. As a result, you cannot assume one global rulebook the way you can with Visa or Mastercard, and the issuer/acquirer duality often collapses into a single bank role.
 
-The lifecycle shape shifts accordingly: **authorization is frequently push-based** (shopper-pushed from their bank or app) rather than pull-based, and **refund/dispute frameworks are usually weaker** than the card chargeback system. Stored-instrument flows also look different — there is no global "PAN token" equivalent, so **Phase 2** (reusing a saved instrument) only exists where the rail supports **standing mandates** or **billing agreements** for repeat or merchant-initiated collection, and behavior stays **method- and country-specific** rather than a single stored-credential framework.
+The lifecycle shape shifts accordingly: **authorization is frequently push-based** (shopper-pushed from their bank or app) rather than pull-based, and **refund/dispute frameworks are usually less standardized** than the card chargeback system. Stored-instrument flows also look different: many rails expose local tokens, aliases, virtual accounts, wallet handles, or mandate references, but there is no single global equivalent to a card PAN-token model. **Phase 2** (reusing a saved instrument) exists where the rail supports **standing mandates**, wallet authorization reuse, or **billing agreements** for repeat or merchant-initiated collection, and behavior remains **method- and country-specific** rather than one universal stored-credential framework.
 
 ### Summary of Differences
 
