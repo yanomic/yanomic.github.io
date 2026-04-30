@@ -15,15 +15,13 @@ tags:
 
 Payment methods do not behave the same way. The split between cards and local payment methods (**LPMs**) is the obvious one, but each category hides its own variations.
 
-This creates real friction on both sides. **Merchants** want to accept payments reliably. **Shoppers** want to pay with their preferred method. Both sides end up navigating inconsistent capabilities, edge cases, and operational trade-offs they should not need to know about to complete a simple transaction.
+This creates real friction on both sides. **Merchants** want to accept payments reliably. **Shoppers** want to pay with their preferred method. Both sides end up navigating inconsistent interactions, edge cases, and operational trade-offs they should not need to know about to complete a simple transaction.
 
-This blog series focuses on **merchant-facing APIs** and describes **capabilities from a functional perspective** — the observable inputs, outputs, and behavior of each payment "black box." Provider-specific implementation details are out of scope.
-
-We also compare payment methods and PSPs against a standard set of capabilities. The goal is a common integration model that absorbs method-specific characteristics rather than leaking them into merchant code.
+This blog series focuses on **merchant-facing APIs** and describes **capabilities from a functional perspective**: the observable inputs, outputs, and behavior of each payment "black box". Provider-specific implementation details are out of scope.
 
 ## Ecosystem and Lifecycle
 
-Card payments are a useful reference because the roles are well defined and the same lifecycle vocabulary (authorize, capture, refund, dispute) appears across many integrations. The ecosystem is not just "shopper and merchant"; several specialized parties cooperate, each with a narrow responsibility.
+Card payments are a useful reference because the roles are well defined and the same lifecycle vocabulary appears across many integrations. The ecosystem is not just "shopper and merchant"; several specialized parties cooperate, each with a narrow responsibility.
 
 **Typical parties in a card transaction**
 
@@ -37,7 +35,7 @@ Card payments are a useful reference because the roles are well defined and the 
 With the parties in place, the same transaction flows through a sequence of well-defined phases. The sections below walk through each one in order.
 
 ### Onboarding
-The merchant (optionally via PSP) onboards with an acquirer: KYC, pricing, MCC, and technical connectivity. The acquirer underwrites the merchant against **scheme rules** — PCI, branding, permitted category use, and cardholder-data handling. In the usual path the **acquirer** validates and approves the application (a **PSP** may handle operations in front of the acquirer). Direct scheme approval is the exception: some programs, high-risk categories, or network registration require the acquirer to file with the scheme, which then accepts or declines. **The cardholder is not involved**; onboarding only establishes what the merchant may initiate later at checkout.
+The merchant (optionally via PSP) onboards with an acquirer: KYC, pricing, MCC, and technical connectivity. The acquirer underwrites the merchant against **scheme rules**: PCI, branding, permitted category use, and cardholder-data handling. In the usual path the **acquirer** validates and approves the application (a **PSP** may handle operations in front of the acquirer). Direct scheme approval is the exception: some programs, high-risk categories, or network registration require the acquirer to file with the scheme, which then accepts or declines. **The cardholder is not involved**; onboarding only establishes what the merchant may initiate later at checkout.
 
 ```mermaid
 sequenceDiagram
@@ -99,18 +97,18 @@ Refunds return money to the cardholder after a successful capture. Operationally
 After clearing, **interbank settlement** nets obligations between issuer and acquirer according to the scheme's arrangements. Separately, the **acquirer settles to the merchant**: payout timing, reserves, and fees are defined in the merchant's contract. The scheme orchestrates settlement between issuer and acquirer; it does not replace the acquirer's merchant payout.
 
 ### Dispute
-Unlike refunds, **disputes** start from the cardholder side: the **cardholder** challenges the charge with the **issuer**, which opens a **chargeback** (or similar) case. The acquirer and merchant then follow a scheme-defined evidence process with fixed timelines. 
+Unlike refunds, **disputes** start from the cardholder side: the **cardholder** challenges the charge with the **issuer**, which opens a **chargeback** (or similar) case. The acquirer and merchant then follow a scheme-defined evidence process with fixed timelines.
 
 ### Tokenization
 The lifecycle above focuses on a **one-off** payment path. This section extends that model to **stored-instrument** journeys, where a payment credential is saved first and then referenced in later transactions. This extension is easiest to read as **two connected phases**: 
 
-1. **Token creation** — in a **shopper-present** checkout, the payment credential is tokenized and saved for later reuse.
-2. **Subsequent charge** — later authorizations reference that saved token, often as **shopper-not-present** transactions.
+1. **Token creation**: in a **shopper-present** checkout, the payment credential is tokenized and saved for later reuse.
+2. **Subsequent charge**: later authorizations reference that saved token, often as **shopper-not-present** transactions.
 
 
 #### Phase 1: Token Creation
 
-Phase 1 is a **customer-initiated transaction (CIT)**. Provisioning and consent are handled within the same checkout flow: the cardholder supplies card details, and the **gateway / PSP** requests tokenization. Depending on the model, the token is provisioned either by the PSP vault or by the payment-method side (network/issuer token service), then bound to the underlying payment credential. In that same CIT flow, the shopper accepts terms to save the card, completes **SCA** when required, and the authorization carries the needed **stored credential** indicators.
+Phase 1 is a **customer-initiated transaction (CIT)**. Provisioning and consent are handled within the same checkout flow: the cardholder supplies card details, and the **gateway / PSP** requests tokenization. Depending on the model, the token is provisioned either by the PSP vault or by a **network** or **issuer** token service, then bound to the underlying card for later scheme routing. In that same CIT flow, the shopper accepts terms to save the card, completes **SCA** when required, and the authorization carries the needed **stored credential** indicators.
 
 ```mermaid
 sequenceDiagram
@@ -172,7 +170,7 @@ These **business patterns** describe how **Phase 2** legs are labeled for scheme
 
 ## Local Payment Methods
 
-For local payment methods (LPMs), the **ecosystem and lifecycle are largely the same** as cards: similar participants and the same high-level phases — initiate, confirm, collect funds, reconcile, and handle refunds and problems. The **differences are in the details** — who plays each role, how authorization is triggered, and how refunds and disputes work. 
+For local payment methods (LPMs), the **ecosystem and lifecycle are largely the same** as cards: similar participants and the same high-level phases — initiate, confirm, collect funds, reconcile, and handle refunds and problems. The **differences are in the details**: who plays each role, how authorization is triggered, and how refunds and disputes work.
 
 ### Ecosystem and Lifecycle at a Glance
 
@@ -194,25 +192,26 @@ The table below consolidates the card baseline and typical LPM behavior across t
 | **Merchant integration** | One mental model (auth/capture/refund) maps across many regions if the PSP abstracts schemes. | More one-off behaviors: expiry of payment codes, offline confirmation, different webhook semantics. |
 | **Saved “token” / instrument id** | **Network** or **PSP token** mapping to PAN. | **Vault payment-method id**, mandate reference, wallet handle — **not** a card PAN token. |
 
-Cards are not universally "better"; they are a **shared rail with predictable roles**. LPMs trade that uniformity for **local reach, lower cost in some markets, or shopper preference** — at the cost of more asynchronous states and method-specific operational playbooks. The next section introduces payment capabilities as the common lens for comparing methods despite these differences.
+Cards are not universally "better"; they are a **shared rail with predictable roles**. LPMs trade that uniformity for **local reach, lower cost in some markets, or shopper preference** — at the cost of more asynchronous states and method-specific operational playbooks. The next section defines **The Five-Lens Framework**: **functions** as the integration units, **five metrics** for comparing how PSP APIs expose them, and shared vocabulary for cross-method comparison.
 
-## Payment Capabilities
+## The Five-Lens Framework
 
-In the following blogs of this series, we will walk through capabilities across the **entire lifecycle** and describe each through a consistent five-lens framework.
+The **Ecosystem and Lifecycle** section tells you *who* is involved and *how* work unfolds from onboarding through disputes. That story orients you in time and roles; it does not give you a blueprint for what to build. **Payment capabilities** are the guideline for what to implement — the merchant-facing operations and signals that make each phase executable, recoverable, and observable without guesswork or manual follow-up. This series treats each capability as a **function** and uses those functions as the organizing keys for the posts that follow.
 
-The **Ecosystem and Lifecycle** section above describes *who* is involved and *what happens* from onboarding through disputes. **Payment capabilities** are the complementary lens: the merchant-facing operations and signals that make each phase executable, recoverable, and observable without guesswork or manual follow-up.
+**The five lenses** are the **metrics** for each function — not a parallel taxonomy, but the dimensions on which you measure semantics, failure behavior, clocks, and how state surfaces to the merchant when you line PSP APIs up against each other.
 
-Those five lenses are worth defining once up front, because what differs across rails is rarely whether a capability exists, but **how it behaves**:
+### The Five Lenses
 
-- **Semantics** — what the capability does and does not do. The input/output contract, and the single question it answers.
-- **State model** — the statuses it produces or transitions, and the allowed transitions between them. Which states are terminal, which are asynchronous, and where the next step lives.
-- **Recovery** — how to stay correct under retries, timeouts, partial failures, duplicate webhooks, and out-of-order events. Idempotency anchors, reconciliation primitives, and safe fallbacks.
-- **Time discipline** — the clocks and windows that govern the capability: review SLAs, expirations, capture windows, representment deadlines, settlement lags.
-- **Observability** — how the merchant learns the current state and the history behind it: synchronous responses, status queries, webhooks, reports, and reconciliation files.
+We define the five metrics once below. What usually differs across rails is not whether a **function** exists, but **how it behaves** under each metric — including under retries, asynchronous flows, deadline pressure, and failure. Comparison is therefore not a race to match feature names; it is whether **that function** behaves consistently when you measure it with **the same five metrics**. That keeps comparisons fair while leaving room for rail-specific detail.
 
-Comparing methods is therefore not just about whether a capability exists, but whether it behaves consistently under retries, asynchronous flows, deadline pressure, and failure. This is why a common capability model helps compare rails on equal footing while preserving method-specific behavior.
+- **Semantics**: what the function does and does not do. The input/output contract, and the single question it answers.
+- **State model**: the statuses the function produces or transitions through, and the allowed transitions between them. Which states are terminal, which are asynchronous, and where the next step lives.
+- **Recovery**: how to stay correct under retries, timeouts, partial failures, duplicate webhooks, and out-of-order events. Idempotency anchors, reconciliation primitives, and safe fallbacks.
+- **Time discipline**: the clocks and windows that govern the function: review SLAs, expirations, capture windows, representment deadlines, settlement lags.
+- **Observability**: how the merchant learns the current state and the history behind it: synchronous responses, status queries, webhooks, reports, and reconciliation files.
 
 ## Closing
 
-This chapter establishes the lifecycle and capability vocabulary used throughout the rest of the series. In the following chapters, we will go capability by capability and propose an ideal merchant-facing protocol by comparing how major PSP APIs model each operation: [Stripe](https://docs.stripe.com/api), [Adyen](https://docs.adyen.com/api-explorer/), [Antom](https://docs.antom.com/ac/ams/api), [Airwallex](https://www.airwallex.com/docs/api), [Checkout.com](https://api-reference.checkout.com/), [Worldpay](https://docs.worldpay.com/access/products/payments/), and [Worldline](https://docs.connect.worldline-solutions.com/documentation/api/).
+This chapter establishes **ecosystem and lifecycle** vocabulary — who participates and how work moves from onboarding through disputes — and sets **payment capabilities** as the guideline for what to build: merchant-facing **functions** measured with **the same five metrics** whenever we compare methods or PSPs.
 
+The posts that follow track the lifecycle **phase by phase**. Each centers on the **functions** that belong in that phase, compares how major PSP APIs model them, and runs **the same five metrics** across implementations — so comparisons stay fair without flattening rail-specific detail.
