@@ -17,7 +17,7 @@ Payment methods do not behave the same way. The split between cards and local pa
 
 This creates real friction on both sides. **Merchants** want to accept payments reliably. **Shoppers** want to pay with their preferred method. Both sides end up navigating inconsistent interactions, edge cases, and operational trade-offs they should not need to know about to complete a simple transaction.
 
-This blog series focuses on **merchant-facing APIs** and describes **capabilities from a functional perspective**: the observable inputs, outputs, and behavior of each payment "black box". Provider-specific implementation details are out of scope.
+This blog series focuses on **merchant-facing APIs** and treats **capabilities** in **functional** terms: only what crosses the integration boundary matters — inputs, responses, observable state, and end-to-end behavior — with the payment path modeled as a **black box**.
 
 ## Ecosystem and Lifecycle
 
@@ -212,6 +212,6 @@ We define the five metrics once below. What usually differs across rails is not 
 
 ## Closing
 
-This chapter establishes **ecosystem and lifecycle** vocabulary — who participates and how work moves from onboarding through disputes — and sets **payment capabilities** as the guideline for what to build: merchant-facing **functions** measured with **the same five metrics** whenever we compare methods or PSPs.
+This chapter establishes **ecosystem and lifecycle** vocabulary — who participates and how work moves from onboarding through disputes — and frames **payment capabilities** as merchant-facing **functions** measured with **five metrics**.
 
-The posts that follow track the lifecycle **phase by phase**. Each centers on the **functions** that belong in that phase, compares how major PSP APIs model them, and runs **the same five metrics** across implementations — so comparisons stay fair without flattening rail-specific detail.
+The posts that follow move **phase by phase** through the lifecycle. Each installment applies those **metrics** to the **functions** that matter in that phase — comparing PSP API surfaces without flattening rail-specific detail.
