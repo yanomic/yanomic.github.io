@@ -176,7 +176,7 @@ For local payment methods (LPMs), the **ecosystem and lifecycle are largely the 
 
 At a high level, LPMs replace cards' **single global scheme layer** with **national or regional operators** — e.g. PIX (BCB, Brazil), UPI (NPCI, India), SEPA CT / SDD (EPC), iDEAL (Currence / EPI), BLIK (Poland), Swish, Bizum, FPS, PayNow, PromptPay — each with its own rules, settlement, and dispute framework. Many of these operators function as **local scheme analogs**, while some flows are more directly **bank-led**, **wallet- or platform-led**, or **bilateral**. As a result, you cannot assume one global rulebook the way you can with Visa or Mastercard, and the issuer/acquirer duality often collapses into a single bank role.
 
-The lifecycle shape shifts accordingly: **authorization is frequently push-based** (shopper-pushed from their bank or app) rather than pull-based, and **refund/dispute frameworks are usually less standardized** than the card chargeback system. Stored-instrument flows also look different: many rails expose local tokens, aliases, virtual accounts, wallet handles, or mandate references, but there is no single global equivalent to a card PAN-token model. **Phase 2** (reusing a saved instrument) exists where the rail supports **standing mandates**, wallet authorization reuse, or **billing agreements** for repeat or merchant-initiated collection, and behavior remains **method- and country-specific** rather than one universal stored-credential framework.
+The lifecycle shape shifts accordingly: **authorization is frequently push-based** (shopper-pushed from their bank or app) rather than pull-based, and **refund/dispute frameworks are usually less standardized** than the card chargeback system. **Stored-instrument** flows also look different: many rails expose local tokens, aliases, virtual accounts, wallet handles, or mandate references, but there is no single global equivalent to a card PAN-token model. **Phase 2** (reusing a saved instrument) exists where the rail supports standing mandates, wallet authorization reuse, or billing agreements for repeat or merchant-initiated collection, and behavior remains **method- and country-specific** rather than one universal stored-credential framework.
 
 ### Summary of Differences
 
@@ -196,17 +196,15 @@ Cards are not universally "better"; they are a **shared rail with predictable ro
 
 ## The Five-Lens Framework
 
-The **Ecosystem and Lifecycle** section tells you *who* is involved and *how* work unfolds from onboarding through disputes. That story orients you in time and roles; it does not give you a blueprint for what to build. **Payment capabilities** are the guideline for what to implement — the merchant-facing operations and signals that make each phase executable, recoverable, and observable without guesswork or manual follow-up. This series treats each capability as a **function** and uses those functions as the organizing keys for the posts that follow.
-
-**The five lenses** are the **metrics** for each function — not a parallel taxonomy, but the dimensions on which you measure semantics, failure behavior, clocks, and how state surfaces to the merchant when you line PSP APIs up against each other.
+The **Ecosystem and Lifecycle** section tells you **who** is involved and **how** work unfolds from onboarding through disputes. That story orients you in time and roles; it does not give you a blueprint for what to build. **Payment capabilities** are the guideline for **what** to implement — the merchant-facing operations and signals that make each phase executable, recoverable, and observable without guesswork or manual follow-up. This series treats each capability as a **function** and uses those functions as the organizing keys for the posts that follow.
 
 ### The Five Lenses
 
-We define the five metrics once below. What usually differs across rails is not whether a **function** exists, but **how it behaves** under each metric — including under retries, asynchronous flows, deadline pressure, and failure. Comparison is therefore not a race to match feature names; it is whether **that function** behaves consistently when you measure it with **the same five metrics**. That keeps comparisons fair while leaving room for rail-specific detail.
+**The five lenses** are the **metrics** for each **function**. They are not a parallel taxonomy beside "functions"; they are the shared dimensions you hold fixed when you compare PSP APIs. What usually differs across rails is not whether a **function** exists, but **how it behaves** under each metric, including under retries, asynchronous flows, deadline pressure, and failure. 
 
 - **Semantics**: what the function does and does not do. The input/output contract, and the single question it answers.
 - **State model**: the statuses the function produces or transitions through, and the allowed transitions between them. Which states are terminal, which are asynchronous, and where the next step lives.
-- **Recovery**: how to stay correct under retries, timeouts, partial failures, duplicate webhooks, and out-of-order events. Idempotency anchors, reconciliation primitives, and safe fallbacks.
+- **Recovery**: how to **stay correct** under retries, timeouts, partial failures, duplicate webhooks, and out-of-order events. Idempotency anchors, reconciliation primitives, and safe fallbacks.
 - **Time discipline**: the clocks and windows that govern the function: review SLAs, expirations, capture windows, representment deadlines, settlement lags.
 - **Observability**: how the merchant learns the current state and the history behind it: synchronous responses, status queries, webhooks, reports, and reconciliation files.
 
