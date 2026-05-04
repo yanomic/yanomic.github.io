@@ -31,6 +31,36 @@ On cards, three shapes dominate:
 - **Frictionless flow** — the issuer authenticates the shopper from device, transaction, and behavioral data alone and authorizes without any shopper interaction. 3-D Secure still runs (authentication evidence is still produced), but the challenge step is skipped and the merchant never leaves its own surface.
 - **Non-3DS / SCA-exempt** — issuer authorises directly from the auth message; common in markets without an SCA mandate, for low-value or merchant-initiated transactions, and under regulator-approved exemptions (TRA, low-value, allowlist).
 
+```mermaid
+sequenceDiagram
+    participant Mer as Merchant
+    participant DS as 3DS Server / Directory
+    participant ACS as Issuer ACS
+    participant Ch as Cardholder
+    participant G as Gateway / PSP
+    participant Acq as Acquirer
+    participant Sch as Scheme
+    participant Iss as Issuer
+    opt Strong customer authentication (e.g. 3-D Secure 2)
+        Mer->>DS: Authentication request (device data, amount, PAN)
+        DS->>ACS: Route to issuer ACS
+        alt Challenge required
+            ACS->>Ch: Step-up challenge
+            Ch->>ACS: Authenticate
+        end
+        ACS->>Mer: Authentication result (CAVV / ECI)
+    end
+    Mer->>G: Authorization request (amount, merchant id, tokenized PAN, CAVV / ECI)
+    G->>Acq: Forward auth
+    Acq->>Sch: Auth request
+    Sch->>Iss: Auth request
+    Iss->>Iss: Decide using funds, risk, and SCA evidence
+    Iss->>Sch: Approve or decline, hold if approved
+    Sch->>Acq: Result
+    Acq->>G: Result
+    G->>Mer: Authorized or declined
+```
+
 Either way, the merchant gets a **synchronous, final authorization outcome** once any authentication and the auth message complete — `Authorised`, `Declined`, or `Error`, with no fourth bucket called *"we'll let you know in a few minutes."* The whole chain runs on tight, scheme-enforced clocks: the issuer answers the auth message in seconds (and if it doesn't, the scheme returns a **stand-in** decision in its place), and the 3-D Secure challenge itself is bounded to a few minutes by the ACS. The only pending-shaped edge cases are recovery scenarios — the shopper's browser doesn't return cleanly from the ACS, or the merchant times out mid-call — and even those resolve within minutes via **status query** or **auth reversal**, not a multi-hour wait.
 
 ### LPM Authorization Flows

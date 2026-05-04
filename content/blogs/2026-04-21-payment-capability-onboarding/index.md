@@ -18,6 +18,20 @@ The information the merchant must supply ranges from **structured legal document
 
 Automation is uneven. Card acquirers typically expose an **onboarding API** or at least a structured partner portal for submission. For many LPMs, the practical channel is still **email threads** or **shared Google Docs / spreadsheets**, with a human on the other end requesting clarifications. Even where an API exists, the review itself is not synchronous — the acquirer or bank takes time to underwrite, and outcomes span **approve**, **approve with conditions / partial approval**, **need additional documents**, and **reject**. Merchants must not assume the API response is the final word, and must instead rely on a status channel: a query endpoint, a webhook, or both.
 
+```mermaid
+sequenceDiagram
+    participant Mer as Merchant / PSP
+    participant Acq as Acquirer
+    participant Sch as Scheme
+    Mer->>Acq: Apply (KYC, business model, MCC, channels, volumes)
+    Acq->>Acq: Underwriting, PCI / data review vs scheme requirements
+    opt Registration or scheme review required
+        Acq->>Sch: Merchant or program registration
+        Sch->>Acq: Approve / decline
+    end
+    Acq->>Mer: MID, pricing, technical connectivity, cleared to accept the brand
+```
+
 A successful onboarding typically yields a **MID** (Merchant ID):
 - Card onboarding often produces a **hierarchy** of identifiers — one or more MIDs (per scheme, per currency, per legal entity), with **store IDs** and **terminal IDs (TID)** beneath them.
 - For marketplaces and platforms, additional **sub-merchant** or **payfac sub-account** identifiers sit under the platform's master MID.

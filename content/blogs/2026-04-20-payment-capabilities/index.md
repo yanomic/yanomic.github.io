@@ -37,52 +37,8 @@ With the parties in place, the same transaction flows through a sequence of well
 ### Onboarding
 The merchant (optionally via PSP) onboards with an acquirer: KYC, pricing, MCC, and technical connectivity. The acquirer underwrites the merchant against **scheme rules**: PCI, branding, permitted category use, and cardholder-data handling. In the usual path the **acquirer** validates and approves the application (a **PSP** may handle operations in front of the acquirer). Direct scheme approval is the exception: some programs, high-risk categories, or network registration require the acquirer to file with the scheme, which then accepts or declines. **The cardholder is usually not directly involved**; onboarding primarily establishes what the merchant may initiate later at checkout, though some programs add end-user consent or compliance controls for stored-credential use cases.
 
-```mermaid
-sequenceDiagram
-    participant Mer as Merchant / PSP
-    participant Acq as Acquirer
-    participant Sch as Scheme
-    Mer->>Acq: Apply (KYC, business model, MCC, channels, volumes)
-    Acq->>Acq: Underwriting, PCI / data review vs scheme requirements
-    opt Registration or scheme review required
-        Acq->>Sch: Merchant or program registration
-        Sch->>Acq: Approve / decline
-    end
-    Acq->>Mer: MID, pricing, technical connectivity, cleared to accept the brand
-```
-
 ### Authorization
 Payment initiation is the merchant starting an authorization: assemble amount, currency, merchant identifiers, and card details, and send the **authorization request** through the gateway and acquirer toward the issuer. During that authorization, the issuer may need to **authenticate** the cardholder first (strong customer authentication / SCA — e.g. 3-D Secure flows, in-app banking approval, OTP, biometrics, or hardware-token factors) before approving. The outcome is typically structured data (e.g. CAVV, ECI) the issuer uses with funds and risk checks to **approve or decline** the transaction. If approved, the issuer places an **authorization hold**. A hold confirms availability and (when SCA ran) payer intent; it does not pay the merchant. Funding follows **capture** and **settlement**.
-
-```mermaid
-sequenceDiagram
-    participant Mer as Merchant
-    participant DS as 3DS Server / Directory
-    participant ACS as Issuer ACS
-    participant Ch as Cardholder
-    participant G as Gateway / PSP
-    participant Acq as Acquirer
-    participant Sch as Scheme
-    participant Iss as Issuer
-    opt Strong customer authentication (e.g. 3-D Secure 2)
-        Mer->>DS: Authentication request (device data, amount, PAN)
-        DS->>ACS: Route to issuer ACS
-        alt Challenge required
-            ACS->>Ch: Step-up challenge
-            Ch->>ACS: Authenticate
-        end
-        ACS->>Mer: Authentication result (CAVV / ECI)
-    end
-    Mer->>G: Authorization request (amount, merchant id, tokenized PAN, CAVV / ECI)
-    G->>Acq: Forward auth
-    Acq->>Sch: Auth request
-    Sch->>Iss: Auth request
-    Iss->>Iss: Decide using funds, risk, and SCA evidence
-    Iss->>Sch: Approve or decline, hold if approved
-    Sch->>Acq: Result
-    Acq->>G: Result
-    G->>Mer: Authorized or declined
-```
 
 ### Capture
 The merchant (or automated rules) sends **capture** instructions for all or part of the authorized amount. The acquirer presents those transactions into **clearing**: the scheme exchanges clearing records with the issuer so the charge can be posted to the cardholder. Capture is about what is owed and **moving the transaction into clearing**; it is still distinct from **settlement**, where money actually moves between banks.
