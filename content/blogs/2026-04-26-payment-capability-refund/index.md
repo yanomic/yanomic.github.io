@@ -43,7 +43,7 @@ The parent payment tracks aggregate refund status separately (`Captured` -> `Par
 ### The Five Lenses
 
 - **Semantics** — return money after clearing acceptance; full/partial/multiple refunds where supported.
-- **State model** — one in-flight state and three terminal outcomes (`Refunded`, `RefundFailed`, `RefundError`), with partial/full tracked on parent.
+- **State model** — one in-flight state and three final outcomes (`Refunded`, `RefundFailed`, `RefundError`), with partial/full tracked on parent.
 - **Recovery** — idempotent refund reference and server-side cap enforcement for partial refunds.
 - **Time discipline** — rail-specific refund window plus settlement lag to cardholder-visible posting.
 - **Observability** — webhooks, status query, and reconciliation report lines per refund object.

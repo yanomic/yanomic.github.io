@@ -33,7 +33,7 @@ Yanomic blog posts read as professional technical reference writing — dense, o
 - **Five-Lens framework for capabilities.** Capability sections close with a `### The Five Lenses` subsection covering, in order: *Semantics, State model, Recovery, Time discipline, Observability* — each as a single bullet.
 - **Capability section order:** intro prose → operational shape (timing / variants) → state machine → Five Lenses.
 - **Definition → boundary → examples.** Inside bullets and paragraphs, lead with the definition, give the bounding clock or scope next, and place concrete examples last.
-- **State machines get a Mermaid diagram.** Use `stateDiagram-v2`; terminal states drain to `[*]`. State names in PascalCase, referenced as `` `StateName` `` in prose.
+- **State machines get a Mermaid diagram.** Use `stateDiagram-v2`; final states drain to `[*]`. State names in PascalCase, referenced as `` `StateName` `` in prose.
 - **Side notes go in blockquotes** with a bold lead-in label, e.g. `> **Note on PSP API surfaces:** ...`.
 
 ## Mechanical conventions
