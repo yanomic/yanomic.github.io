@@ -1,7 +1,7 @@
 ---
 draft: true
-title: Payment Capability - Authorize and Capture
-slug: payment-capability-authorize-and-capture
+title: Payment Capability - Authorize, Capture, and Cancel
+slug: payment-capability-authorize-capture-cancel
 date: 2026-04-23T09:00:00+0800
 categories:
 - Payments
@@ -9,18 +9,16 @@ tags:
 - Payment Capabilities
 - Authorize
 - Capture
-aliases:
-- /blogs/payment-capability-authorize/
+- Cancel
 ---
 
 ## Introduction
 
 Authorization is the most consequential capability in the lifecycle. It **marks the start of a payment**, and it is where the most parties interact: shopper, merchant, PSP, acquirer, scheme or rail operator, issuer, and — on many LPMs — a wallet or platform sitting alongside the bank. Every substantive check happens inside this one call: **risk scoring**, **authentication of the payer**, **fraud screening**, **funds / balance check**, **velocity and regulatory limits**, **sanctions / AML**. A payment is only authorized once all of these pass.
 
-On **dual-message (DMS)** rails, that approval is only a **hold** until **capture** presents the transaction into clearing for the amount the merchant is owed. On **single-message (SMS)** and SMS-equivalent rails, **one instruction** reaches **`Authorised`** and **`Captured`** together — there is no hold and no separate merchant capture call.
-
 ## Single-Message vs Dual-Message 
-Authorization terminates differently depending on whether authorization and clearing travel as **one message** or **two** — a foundational distinction that the rest of this post leans on. The card industry names the split directly:
+
+Authorization terminates differently depending on whether authorization and clearing travel as **one message** or **two** — a foundational distinction that the rest of this post leans on. On **dual-message (DMS)** rails, a successful authorization is only a **hold** until **capture** presents the transaction into clearing for the amount the merchant is owed; on **single-message (SMS)** and SMS-equivalent rails, **one instruction** reaches **`Authorised`** and **`Captured`** together — there is no hold and no separate merchant capture call. The card industry names the split directly:
 
 - **Single-Message System (SMS)**: also called `sale` or `purchase` — folds authorization and clearing into a single message, and there is no separate capture instruction. When authorization succeeds, the money is already moving.
 - **Dual-Message System (DMS)**: `auth + capture`, sometimes labelled **two-step** in PSP documentation — reserves funds first and requires a separate capture call to push the transaction into clearing. Authorization leaves an **authorization hold** that the merchant later captures or releases.
@@ -146,6 +144,47 @@ None of these shapes need new top-level payment states on the parent authorizati
 
 On SMS-equivalent rails, these variants are usually represented as separate transactions or refunds rather than capture calls against a hold.
 
+## Cancel
+
+Cancel is the instruction that releases an **active authorization hold** before clearing has accepted capture. It only applies on **DMS** rails. On **SMS** and SMS-equivalent rails the money has already moved by the time authorization succeeds, so there is no hold to release; the equivalent business outcome is a **refund**.
+
+Cancel **moves no money**. The hold dissolves at the rail and the shopper's available credit or balance is restored once the issuer processes the reversal.
+
+### Cancel variants
+
+- **Full cancel** — release the **entire remaining** hold in one instruction (omit amount on the cancel call when the API treats that as “all of `amountCapturable`”).
+- **Partial cancel** — a **partial reversal**: release part of the hold while the remainder stays live for capture. Not every acquirer or PSP exposes it.
+- **Multiple partial cancels** — stack against the same authorization until the remaining authorized balance reaches zero or the merchant captures what is left.
+
+Each attempt still runs `CancelReceived` → `Canceled` / `CancelFailed` / `CancelError`; the parent carries `amountAuthorized`, `amountCapturable`, and `PartiallyCanceled` / `Canceled` as in the state machine below. Canceling what remains **after** a partial capture is the same shape: cancel against the **remaining** hold, not a separate variant.
+
+> **Note**:
+> * **PSP vocabulary:** Many products say **void** or **reversal** instead of cancel; timing relative to batch still lands in the same per-operation states.
+> * **LPM partial cancel:** LPMs essentially never support partial cancel. The few rails that expose any cancel usually expose only full-amount cancel.
+
+
+### Cancel state machine
+
+Cancel is typically synchronous at the API surface. The acquirer accepts or refuses quickly because no clearing instruction is dispatched.
+
+- **`CancelReceived`** — accepted and in flight toward the rail.
+- **`Canceled`** — accepted by the rail.
+- **`CancelFailed`** — refused by the rail.
+- **`CancelError`** — technical failure prevented a clean outcome.
+
+```mermaid
+stateDiagram-v2
+    [*] --> CancelReceived: cancel submitted
+    CancelReceived --> Canceled: rail accepts
+    CancelReceived --> CancelFailed: rail refuses
+    CancelReceived --> CancelError: technical failure
+    Canceled --> [*]
+    CancelFailed --> [*]
+    CancelError --> [*]
+```
+
+The parent authorization carries aggregate state separately. Each successful per-operation `Canceled` decrements remaining authorized balance; the parent moves `Authorised` → `PartiallyCanceled` → `Canceled` as the hold is released in part or in full.
+
 ### Cancel after capture is initiated
 
 If the merchant tries to cancel after capture is in flight:
@@ -153,46 +192,66 @@ If the merchant tries to cancel after capture is in flight:
 - **`CaptureReceived` (pre-cutoff)** — the capture can often still be pulled from a pending batch.
 - **`Captured` (post-cutoff)** — clearing already accepted; cancel fails and the merchant must **refund**.
 
-If capture and cancel race, deterministic ordering on the authorization id decides the winner; both operations must be idempotent.
+If capture and cancel race for the same payment resource (`paymentId`), the processor orders them deterministically; both operations must be idempotent.
 
 
 ## Endpoints
 
-A capability-centred surface aligned with the state machines above. Authorization and capture share `paymentId`; each capture attempt gets `captureId`. Idempotency keys are per operation.
+A capability-centred surface aligned with the state machines above. Authorization, capture, and cancel share `paymentId`; each capture attempt gets `captureId` and each cancel attempt gets `cancelId`. 
+
+> Optional per-operation request ids on mutating `POST`s, replay behaviour, TLS, signing, errors, and webhooks follow [Payment APIs — cross-cutting conventions](/blogs/payment-api-cross-cutting-conventions/).
 
 ### Authorization
 
-- **Initiate** (`POST /payments`): creates a payment resource and starts authorization. Idempotent on `authorizationRequestId`.
-    - **Request**: `authorizationRequestId` (idempotency key), `amount`, `currency`, `merchantReference`, `paymentMethod` (or token reference), `channel`, `returnUrl`, optional `captureMode` (`AUTO` for SMS-equivalent rails, `MANUAL` for DMS holds), and optional merchant-set `expiresAt`.
+- **Initiate** (`POST /payments`): creates a payment resource and starts authorization.
+    - **Request**: optional `authorizationRequestId` (client request id for this create); `amount`, `currency`, `merchantReference`, `paymentMethod` (or token reference), `channel`, `returnUrl`, optional `captureMode` (`AUTO` for SMS-equivalent rails, `MANUAL` for DMS holds), and optional merchant-set `expiresAt`.
     - **Response**: the payment resource — `paymentId`, `state` `Received`, `expiresAt`, `amountAuthorized`, `amountCaptured`, `amountCapturable`, and optional `nextAction` when the rail needs shopper interaction (`type`, redirect or scheme URL, app link, or 3DS challenge data, each with `expiresAt`).
-    - **Errors**: validation failures return `422 Unprocessable Entity` with structured paths. Replaying the same `authorizationRequestId` returns the existing resource instead of minting a second `paymentId`.
-- **Complete** (`POST /payments/{id}/complete`): submits shopper-return data after redirect, 3DS, wallet, or voucher steps.
-    - **Request**: `paymentId` in the path and a rail-specific completion payload — 3DS challenge result, redirect callback fields, wallet token, or voucher confirmation reference.
+    - **Errors**: validation failures return `422 Unprocessable Entity` with structured paths. Without a request id, repeated `POST /payments` may create duplicate resources unless the merchant enforces uniqueness elsewhere (for example on `merchantReference`).
+- **Complete** (`POST /payments/{paymentId}/complete`): submits shopper-return data after redirect, 3DS, wallet, or voucher steps.
+    - **Request**: `paymentId` in the path; optional `completeRequestId` (client request id for this completion); and a rail-specific completion payload — 3DS challenge result, redirect callback fields, wallet token, or voucher confirmation reference.
     - **Response**: the payment resource in its post-completion `state` (`Authorised`, `Declined`, `Error`, `Expired`, or `Closed`).
     - **Errors**: calling complete when the resource is already final returns `409 Conflict`. Calling complete when no `nextAction` was outstanding is a no-op with the current resource.
-- **Increment** (`POST /payments/{id}/increments`): raises `amountAuthorized` before capture when scheme and product allow incremental authorization. Idempotent on `incrementRequestId`.
-    - **Request**: `incrementRequestId` (idempotency key) and the additional `amount` to add to the hold.
+- **Increment** (`POST /payments/{paymentId}/increments`): raises `amountAuthorized` before capture when scheme and product allow incremental authorization.
+    - **Request**: optional `incrementRequestId` (client request id for this increment) and the additional `amount` to add to the hold.
     - **Response**: the payment resource with `state` `Authorised` and updated `amountAuthorized` and `amountCapturable`.
     - **Errors**: calling increment when the parent is not `Authorised`, or when the rail rejects the raise, returns `409 Conflict` or `422 Unprocessable Entity` with a structured reason.
-- **Status** (`GET /payments/{id}`): reads the payment resource at any point in the lifecycle.
-    - **Response**: `paymentId`, `state` (`Received`, `Authorised`, `Declined`, `Error`, `Expired`, `Closed`), `expiresAt`, `amountAuthorized`, `amountCaptured`, `amountCapturable`, structured decline or error reasons, and rail identifiers (`pspReference`, `authCode`, `cavv`, `eci`). The provider must answer this read before any webhook has fired.
+- **Status** (`GET /payments/{paymentId}`): reads the payment resource at any point in the lifecycle.
+    - **Response**: `paymentId`, `state` (`Received`, `Authorised`, `PartiallyCanceled`, `Canceled`, `Declined`, `Error`, `Expired`, `Closed`), `expiresAt`, `amountAuthorized`, `amountCaptured`, `amountCapturable`, structured decline or error reasons, and rail identifiers (`pspReference`, `authCode`, `cavv`, `eci`). The provider must answer this read before any webhook has fired.
 - **Webhook**: outbound `POST` to the merchant's registered URL on each final authorization transition.
     - **Payload**: event type (`authorization.received`, `authorization.authorised`, `authorization.declined`, `authorization.expired`, `authorization.closed`, `authorization.error`) and the same payment resource shape as **Status**. Idempotent on `(paymentId, state)`.
-    - **Acknowledgement**: HMAC signature on delivery; the merchant responds with `200 OK`. Missed or rejected deliveries are replayable from a dashboard.
+    - **Acknowledgement**: per the cross-cutting conventions (signed delivery, `200 OK`, replay window).
 
-### Capture (DMS; SMS-equivalent rails omit separate capture calls)
+### Capture
 
-- **Initiate capture** (`POST /payments/{id}/captures`): presents part or all of an `Authorised` hold into clearing. Idempotent on `captureRequestId`.
-    - **Request**: `captureRequestId` (idempotency key) and `amount` ≤ `amountCapturable`.
-    - **Response**: a capture resource — `captureId`, parent `paymentId`, `amount`, and `state` `CaptureReceived` when clearing is async, or `Captured` when the rail answers inline. Partial and multiple capture are repeated calls with different `captureRequestId` values until `amountCapturable` is zero or the hold is released.
+DMS only; SMS-equivalent rails omit separate capture calls.
+
+- **Initiate capture** (`POST /payments/{paymentId}/captures`): presents part or all of an `Authorised` hold into clearing.
+    - **Request**: optional `captureRequestId` (client request id for this capture) and `amount` ≤ `amountCapturable`.
+    - **Response**: a capture resource — `captureId`, parent `paymentId`, `amount`, and `state` `CaptureReceived` when clearing is async, or `Captured` when the rail answers inline. Partial and multiple capture are repeated `POST`s until `amountCapturable` is zero or the hold is released.
     - **Errors**: capture when the parent is not `Authorised`, or for more than `amountCapturable` without an allowed over-capture path, returns `409 Conflict` or `422 Unprocessable Entity`.
-- **Capture status** (`GET /payments/{id}/captures/{captureId}`): reads one capture attempt.
+- **Capture status** (`GET /payments/{paymentId}/captures/{captureId}`): reads one capture attempt.
     - **Response**: `captureId`, parent `paymentId`, `amount`, and `state` (`CaptureReceived`, `Captured`, `CaptureFailed`, `CaptureError`), plus clearing refusal or error detail when applicable.
-- **List captures** (`GET /payments/{id}/captures`): lists capture attempts on the parent authorization.
+- **List captures** (`GET /payments/{paymentId}/captures`): lists capture attempts on the parent authorization.
     - **Response**: an ordered list of capture resources for partial and multiple capture reconciliation. **Status** on the parent remains the aggregate view (`amountCaptured`, `amountCapturable`).
 - **Webhook**: outbound `POST` per `captureId` when a capture attempt reaches a final state.
     - **Payload**: event type (`capture.received`, `capture.captured`, `capture.failed`, `capture.error`), `captureId`, `amount`, parent `paymentId`, and the capture resource fields from **Capture status**.
-    - **Acknowledgement**: same HMAC and replay contract as authorization webhooks.
+    - **Acknowledgement**: per the cross-cutting conventions.
+
+### Cancel
+
+DMS only; SMS-equivalent rails omit separate cancel calls.
+
+- **Initiate cancel** (`POST /payments/{paymentId}/cancels`): releases part or all of an `Authorised` hold before clearing accepts capture.
+    - **Request**: optional `cancelRequestId` (client request id for this cancel) and optional `amount` for partial cancel; omit `amount` for a full cancel of the remaining hold.
+    - **Response**: a cancel resource — `cancelId`, parent `paymentId`, `amount`, and `state` `CancelReceived` when the rail answers async, or `Canceled` when the reversal lands inline. Partial cancel is repeated `POST`s until the parent reaches `Canceled` or the merchant captures the remainder.
+    - **Errors**: cancel when the parent is not `Authorised` or `PartiallyCanceled`, when the amount exceeds the remaining hold, or when capture has already cleared, returns `409 Conflict` or `422 Unprocessable Entity`. A race with an in-flight capture resolves deterministically for that `paymentId`.
+- **Cancel status** (`GET /payments/{paymentId}/cancels/{cancelId}`): reads one cancel attempt.
+    - **Response**: `cancelId`, parent `paymentId`, `amount`, and `state` (`CancelReceived`, `Canceled`, `CancelFailed`, `CancelError`), plus rail refusal or error detail when applicable.
+- **List cancels** (`GET /payments/{paymentId}/cancels`): lists cancel attempts on the parent authorization.
+    - **Response**: an ordered list of cancel resources for partial cancel reconciliation. **Status** on the parent remains the aggregate view (`amountAuthorized`, `amountCapturable`, and parent `state` `Authorised`, `PartiallyCanceled`, or `Canceled`).
+- **Webhook**: outbound `POST` per `cancelId` when a cancel attempt reaches a final state.
+    - **Payload**: event type (`cancel.received`, `cancel.canceled`, `cancel.failed`, `cancel.error`), `cancelId`, `amount`, parent `paymentId`, and the cancel resource fields from **Cancel status**.
+    - **Acknowledgement**: per the cross-cutting conventions.
 
 
 ## The Five Lenses
@@ -201,7 +260,7 @@ A capability-centred surface aligned with the state machines above. Authorizatio
 
 - **Semantics**: confirm payer intent and secure rail authorisation — a hold to capture later on DMS rails, or authorisation and clearing in one step on SMS-equivalent rails.
 - **State model**: one in-flight state (`Received`) and four authorization failure finals (`Declined`, `Error`, `Expired`, `Closed`). `Authorised` is the success handoff into capture on DMS; on SMS-equivalent rails `Authorised` and `Captured` coalesce in one rail step.
-- **Recovery**: idempotent create and complete; when the response or return path leaves the outcome unclear, query status, then reverse the auth if the rail still allows it.
+- **Recovery**: optional client request ids on mutating `POST`s (see [cross-cutting conventions](/blogs/payment-api-cross-cutting-conventions/)); when the response or return path leaves the outcome unclear, query status, then reverse the auth if the rail still allows it.
 - **Time discipline**: merchant-set expiry bounds the authorization; 3-D Secure, redirect, and voucher hold windows are shorter clocks inside that bound.
 - **Observability**: many card rails answer synchronously; when they do not, or on async LPMs, webhooks and status queries are how the merchant learns the final outcome.
 
@@ -209,9 +268,17 @@ A capability-centred surface aligned with the state machines above. Authorizatio
 
 - **Semantics**: present a prior authorization into clearing; capture decides what amount is owed and when it enters the clearing stream.
 - **State model**: begins at `Authorised`; on DMS, one in-flight capture state (`CaptureReceived`) and three capture finals (`Captured`, `CaptureFailed`, `CaptureError`); on SMS-equivalent rails, `Captured` follows `Authorised` in the same rail step without `CaptureReceived`. Partial and multiple captures reuse those states; the parent authorization tracks authorized, captured, and capturable amounts.
-- **Recovery**: idempotent capture reference; status query before replay when the HTTP outcome is uncertain.
+- **Recovery**: optional `captureRequestId` on capture `POST`s (see [cross-cutting conventions](/blogs/payment-api-cross-cutting-conventions/)); status query before replay when the HTTP outcome is uncertain.
 - **Time discipline**: **capture window** and **clearing cutoff** are the controlling clocks; batch submission adds a second cutoff boundary.
 - **Observability**: webhooks and status query per capture object; settlement reporting is the reconciliation source of truth.
+
+### Cancel
+
+- **Semantics**: release an active authorization hold before clearing has accepted capture; DMS-only; no money movement.
+- **State model**: per-operation states (`CancelReceived`, `Canceled`, `CancelFailed`, `CancelError`); the parent authorization tracks `Authorised`, `PartiallyCanceled`, and `Canceled` as the hold is released in part or in full.
+- **Recovery**: optional `cancelRequestId` on cancel `POST`s (see [cross-cutting conventions](/blogs/payment-api-cross-cutting-conventions/)); a race with capture must fail deterministically; recover `CancelError` via status query.
+- **Time discipline**: bounded by clearing cutoff and authorization expiry.
+- **Observability**: synchronous response where supported, webhook where async, status query for authoritative state.
 
 ## Summary
 
@@ -219,7 +286,7 @@ Authorization is where a payment starts and where the chain runs its substantive
 
 On cards, challenge, frictionless, and non-3DS paths still end in a synchronous approved-or-declined outcome once authentication and the auth message complete, with scheme-enforced clocks and stand-in when the issuer does not answer in time. LPMs diverge by channel — redirect, QR, deeplink, push, SMS, embedded codes, vouchers, bank transfer with reference — but they share one property: the shopper leaves the merchant environment, so the authorization result is asynchronous by default and reliable integrations treat webhooks and status queries as part of the capability itself.
 
-Model authorization as a stateful resource with a bounded expiry: one in-flight `Received` state, four authorization failure finals (`Declined`, `Error`, `Expired`, `Closed`), and `Authorised` as the success handoff. Recovery uses idempotency on submit, status query or auth reversal when the outcome is uncertain, and expiry as the primary time boundary across rail-specific sub-clocks. On DMS rails, `Authorised` opens the capture window: capture runs through `CaptureReceived` to `Captured`, `CaptureFailed`, or `CaptureError`, with clearing cutoff and batch submission as the controlling clocks. On SMS-equivalent rails, `Authorised` and `Captured` still apply and land in the same rail step — without `CaptureReceived` or a separate merchant capture call.
+Model authorization as a stateful resource with a bounded expiry: one in-flight `Received` state, four authorization failure finals (`Declined`, `Error`, `Expired`, `Closed`), and `Authorised` as the success handoff. Recovery uses optional client request ids when the merchant needs replay safety (see [Payment APIs — cross-cutting conventions](/blogs/payment-api-cross-cutting-conventions/)), plus status query or auth reversal when the outcome is uncertain, and expiry as the primary time boundary across rail-specific sub-clocks. On DMS rails, `Authorised` opens the capture window and the cancel path: capture runs through `CaptureReceived` to `Captured`, `CaptureFailed`, or `CaptureError`; cancel runs through `CancelReceived` to `Canceled`, `CancelFailed`, or `CancelError`, with the parent moving to `PartiallyCanceled` or `Canceled` as the hold is released. Clearing cutoff and batch submission bound capture; cancel races with in-flight capture resolve deterministically for that `paymentId`. On SMS-equivalent rails, `Authorised` and `Captured` still apply and land in the same rail step — without `CaptureReceived`, a separate merchant capture call, or cancel against a hold.
 
 -----
 ## Appendix
