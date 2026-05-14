@@ -12,7 +12,7 @@ tags:
 
 ## Introduction
 
-Payment orchestration APIs share the same transport and contract problems as any REST surface: the caller must retry safely, authenticate, parse failures consistently, and verify inbound webhooks. Capability posts (for example [Authorize, capture, and cancel](/blogs/payment-capability-authorize-capture-cancel/)) stay focused on **resources and state**; this post records **cross-cutting** rules that apply to **every** endpoint on the API.
+Payment orchestration APIs share the same transport and contract problems as any REST surface: the caller must retry safely, authenticate, parse failures consistently, and verify inbound webhooks. Capability posts (for example [Authorize, capture, cancel, and refund](/blogs/payment-capability-authorize-capture-cancel/)) stay focused on **resources and state**; this post records **cross-cutting** rules that apply to **every** endpoint on the API.
 
 ## Idempotency and client request ids
 
