@@ -103,7 +103,11 @@ Many PSPs expose a hybrid: per-authorization API calls while aggregating into a 
 
 ### Capture state machine
 
-Capture is **asynchronous on DMS rails**: the API accepts the instruction before clearing commits. Entry is always from **`Authorised`** on the parent authorization.
+Capture is **asynchronous on DMS rails**: the API accepts the instruction before clearing commits. Entry is always from **`Authorised`** on the parent authorization. PSPs differ on how much of that asynchrony is visible in the first HTTP response (some return `202` or `received` and complete in a webhook; see Appendix A).
+
+> **Authorization lifetime vs capture window:**
+> - **Stripe:** uncaptured Payment Intents are cancelled after a configured period by default ([Capture](https://docs.stripe.com/api/payment_intents/capture) intro).
+> - **Checkout.com:** if `capture` is `false`, uncaptured payments are voided after seven days unless captured ([Capture a payment](https://www.checkout.com/docs/payments/manage-payments/capture-a-payment)). Treat these as **expiry** clocks separate from the **capture window** the scheme sets for presenting into clearing.
 
 - **`CaptureReceived`** — accepted and in flight toward clearing.
 - **`Captured`** — clearing accepted the capture.
@@ -159,14 +163,14 @@ Cancel **moves no money**. The hold dissolves at the rail and the shopper's avai
 
 Each attempt still runs `CancelReceived` → `Canceled` / `CancelFailed` / `CancelError`; the parent carries `amountAuthorized`, `amountCapturable`, and `PartiallyCanceled` / `Canceled` as in the state machine below. Canceling what remains **after** a partial capture is the same shape: cancel against the **remaining** hold, not a separate variant.
 
-> **Note**:
-> * **PSP vocabulary:** Many products say **void** or **reversal** instead of cancel; timing relative to batch still lands in the same per-operation states.
-> * **LPM partial cancel:** LPMs essentially never support partial cancel. The few rails that expose any cancel usually expose only full-amount cancel.
+> **Notes on cancel variants**
+> - **PSP vocabulary:** Many products say **void** or **reversal** instead of cancel; timing relative to batch still lands in the same per-operation states.
+> - **LPM partial cancel:** LPMs essentially never support partial cancel. The few rails that expose any cancel usually expose only full-amount cancel.
 
 
 ### Cancel state machine
 
-Cancel is typically synchronous at the API surface. The acquirer accepts or refuses quickly because no clearing instruction is dispatched.
+Cancel is often **fast at the HTTP boundary** because no capture has entered clearing yet, but some PSPs still return an **accepted** response (`received`, `202`) and deliver the rail outcome asynchronously in a **webhook** (for example Adyen **CANCELLATION** after [`POST /payments/{paymentPspReference}/cancels`](https://docs.adyen.com/api-explorer/Checkout/71/post/payments/(paymentPspReference)/cancels)).
 
 - **`CancelReceived`** — accepted and in flight toward the rail.
 - **`Canceled`** — accepted by the rail.
@@ -327,7 +331,7 @@ Applies once the parent has reached `Captured` (or equivalent settled state on t
 - **State model**: per-operation states (`CancelReceived`, `Canceled`, `CancelFailed`, `CancelError`); the parent authorization tracks `Authorised`, `PartiallyCanceled`, and `Canceled` as the hold is released in part or in full.
 - **Recovery**: optional `cancelRequestId` on cancel `POST`s (see [cross-cutting conventions](/blogs/payment-api-cross-cutting-conventions/)); a race with capture must fail deterministically; recover `CancelError` via status query.
 - **Time discipline**: bounded by clearing cutoff and authorization expiry.
-- **Observability**: synchronous response where supported, webhook where async, status query for authoritative state.
+- **Observability**: synchronous HTTP acceptance where the product returns a final body; otherwise webhooks and status query carry the rail outcome (see Appendix A for provider-specific capture and cancel notifications).
 
 ### Refund
 
@@ -348,12 +352,14 @@ Model authorization as a stateful resource with a bounded expiry: one in-flight 
 -----
 ## Appendix
 
-### Appendix A: Provider Docs
+### Appendix A: Provider docs (authorize, capture, cancel)
 
-- **Stripe (Payment Intents):** [Create](https://docs.stripe.com/api/payment_intents/create), [Confirm](https://docs.stripe.com/api/payment_intents/confirm), [Retrieve](https://docs.stripe.com/api/payment_intents/retrieve), [Verifying status](https://docs.stripe.com/payments/payment-intents/verifying-status).
-- **Adyen (Checkout):** [`POST /payments`](https://docs.adyen.com/api-explorer/Checkout/71/post/payments), [`POST /payments/details`](https://docs.adyen.com/api-explorer/Checkout/71/post/payments/details), [`POST /sessions`](https://docs.adyen.com/api-explorer/Checkout/71/post/sessions), [`GET /sessions/{sessionId}`](https://docs.adyen.com/api-explorer/Checkout/71/get/sessions/(sessionId)), [Webhook AUTHORISATION](https://docs.adyen.com/api-explorer/Webhooks/1/post/AUTHORISATION).
-- **Antom (AMS):** [pay](https://docs.antom.com/ac/ams/payment_cashier), [inquiryPayment](https://docs.antom.com/ac/ams/paymentri_online), [notifyPayment](https://docs.antom.com/ac/ams/paymentrn_online).
-- **Airwallex (Payments):** [Create PaymentIntent](https://www.airwallex.com/docs/api/payments/payment_intents/create), [Confirm](https://www.airwallex.com/docs/api/payments/payment_intents/confirm), [Retrieve](https://www.airwallex.com/docs/api/payments/payment_intents/retrieve), [Webhooks](https://www.airwallex.com/docs/payments/reference/payments-webhooks), [Statuses](https://www.airwallex.com/docs/payments/reference/payment-statuses).
-- **Checkout.com:** [Authorize a payment](https://www.checkout.com/docs/payments/manage-payments/authorize-a-payment), [API reference](https://api-reference.checkout.com/), [`authorization_approved` webhook](https://www.checkout.com/docs/developer-resources/webhooks/webhook-event-types/authorization_approved).
-- **Worldpay (Access, Card Payments):** [Take a payment](https://developer.worldpay.com/access/products/card-payments/v6/authorize-a-payment), [Query a payment](https://developer.worldpay.com/products/card-payments/openapi/query-a-payment), [Events](https://developer.worldpay.com/access/products/events/openapi).
-- **Worldline (Connect):** [Create payment](https://apireference.connect.worldline-solutions.com/s2sapi/v1/en_US/java/payments/create.html), [Get payment](https://apireference.connect.worldline-solutions.com/s2sapi/v1/en_US/java/payments/get.html), [Webhooks](https://docs.connect.worldline-solutions.com/support/faq/connect/webhooks), [Statuses](https://docs.direct.worldline-solutions.com/en/integration/api-developer-guide/statuses).
+Links are the canonical API reference or guide entry points the post leans on. Naming differs by PSP (`capture` vs `settle`, `cancel` vs `void`); the capability model in the main text maps onto these operations.
+
+- **Stripe (Payment Intents):** [Create](https://docs.stripe.com/api/payment_intents/create), [Confirm](https://docs.stripe.com/api/payment_intents/confirm), [Retrieve](https://docs.stripe.com/api/payment_intents/retrieve), [Capture](https://docs.stripe.com/api/payment_intents/capture), [Cancel](https://docs.stripe.com/api/payment_intents/cancel), [Verifying status](https://docs.stripe.com/payments/payment-intents/verifying-status). Cancel on `requires_capture` releases uncaptured funds (Stripe documents automatic refund of `amount_capturable`).
+- **Adyen (Checkout API v71):** [`POST /payments`](https://docs.adyen.com/api-explorer/Checkout/71/post/payments), [`POST /payments/details`](https://docs.adyen.com/api-explorer/Checkout/71/post/payments/details), [`POST /sessions`](https://docs.adyen.com/api-explorer/Checkout/71/post/sessions), [`GET /sessions/{sessionId}`](https://docs.adyen.com/api-explorer/Checkout/71/get/sessions/(sessionId)), [`POST /payments/{paymentPspReference}/captures`](https://docs.adyen.com/api-explorer/Checkout/71/post/payments/(paymentPspReference)/captures), [`POST /payments/{paymentPspReference}/cancels`](https://docs.adyen.com/api-explorer/Checkout/71/post/payments/(paymentPspReference)/cancels) (outcome in **CAPTURE** / **CANCELLATION** webhooks; optional `Idempotency-Key` header on mutating calls), [Webhook `AUTHORISATION`](https://docs.adyen.com/api-explorer/Webhooks/1/post/AUTHORISATION).
+- **Antom (AMS):** [`POST /v1/payments/pay`](https://docs.antom.com/ac/ams/payment_cashier), [`POST /v1/payments/capture`](https://docs.antom.com/ac/ams/capture), [`POST /v1/payments/cancel`](https://docs.antom.com/ac/ams/paymentc_online), [inquiryPayment](https://docs.antom.com/ac/ams/paymentri_online), [notifyPayment](https://docs.antom.com/ac/ams/paymentrn_online).
+- **Airwallex (Payments):** [Create PaymentIntent](https://www.airwallex.com/docs/api/payments/payment_intents/create), [Confirm](https://www.airwallex.com/docs/api/payments/payment_intents/confirm), [Retrieve](https://www.airwallex.com/docs/api/payments/payment_intents/retrieve), [Capture](https://www.airwallex.com/docs/api/payments/payment_intents/capture), [Cancel](https://www.airwallex.com/docs/api/payments/payment_intents/cancel), [Webhooks](https://www.airwallex.com/docs/payments/reference/payments-webhooks), [Statuses](https://www.airwallex.com/docs/payments/reference/payment-statuses).
+- **Checkout.com:** [Authorize a payment](https://www.checkout.com/docs/payments/manage-payments/authorize-a-payment), [Capture a payment](https://www.checkout.com/docs/payments/manage-payments/capture-a-payment) (`POST .../payments/{id}/captures`; `capture_type` for partial / multi-capture), [Void a payment](https://www.checkout.com/docs/payments/manage-payments/void-a-payment) (`POST .../payments/{id}/voids`), [API reference](https://api-reference.checkout.com/), [`authorization_approved` webhook](https://www.checkout.com/docs/developer-resources/webhooks/webhook-event-types/authorization_approved), [`payment_captured`](https://www.checkout.com/docs/developer-resources/event-notifications/event-types/payment_captured), [`payment_voided`](https://www.checkout.com/docs/developer-resources/event-notifications/event-types/payment_voided).
+- **Worldpay (Access, Card Payments):** [Take a payment / authorize](https://developer.worldpay.com/access/products/card-payments/v6/authorize-a-payment), [Query a payment](https://developer.worldpay.com/products/card-payments/openapi/query-a-payment), [Manage payments](https://developer.worldpay.com/products/card-payments/openapi/manage-payments) (settle for capture; full and partial authorization cancellations), [Events](https://developer.worldpay.com/access/products/events/openapi).
+- **Worldline (Connect):** [Create payment](https://apireference.connect.worldline-solutions.com/s2sapi/v1/en_US/java/payments/create.html), [Get payment](https://apireference.connect.worldline-solutions.com/s2sapi/v1/en_US/java/payments/get.html), [Capture payment](https://apireference.connect.worldline-solutions.com/s2sapi/v1/en_US/java/payments/capture.html), [Cancel payment](https://apireference.connect.worldline-solutions.com/s2sapi/v1/en_US/java/payments/cancel.html), [Webhooks](https://docs.connect.worldline-solutions.com/support/faq/connect/webhooks), [Statuses](https://docs.direct.worldline-solutions.com/en/integration/api-developer-guide/statuses).
