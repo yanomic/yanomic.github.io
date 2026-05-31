@@ -28,7 +28,7 @@ For each settlement window and each merchant or MID, the platform must answer:
 
 * Which internal transactions settled in this payout?
 * What fees, reserves, and FX adjustments explain the delta between gross and net?
-* Where settlement lines, existing records, and bank statement entries disagree, and what explains the exceptions?
+* Where settlement lines, payment records, and bank statement entries disagree, and what explains the exceptions?
 
 Answering those questions at scale means clearing publisher-specific obstacles in ingestion, matching, and operations.
 

@@ -19,7 +19,7 @@ Publisher settlement reports arrive in incompatible shapes, through different ch
 
 ### Product
 
-A **settlement report processing engine** (**engine**) that connects **publishers** — PSPs, acquirers, wallet operators, banks — to **consumers** — finance reconciliation jobs and internal data pipelines. The engine owns ingest, normalization, matching, and export. Close scheduling, approval, and reporting workflows stay with consumers.
+A **settlement report processing engine** (**engine**) that connects **publishers** — PSPs, acquirers, wallet operators, banks — to **consumers** — finance reconciliation jobs and internal data pipelines. The engine owns ingest, normalization, matching, reconciliation, and export. Close scheduling, approval, and reporting workflows stay with consumers.
 
 ### Design goals
 
@@ -31,44 +31,43 @@ For each settlement window and each merchant or MID, consumers must be able to a
 
 - Which internal transactions settled in this payout?
 - What fees, reserves, and FX adjustments explain the delta between gross and net?
-- Where settlement lines, existing records, and bank statement entries disagree, and what explains the exceptions?
+- Where settlement lines, payment records, and bank statement entries disagree, and what explains the exceptions?
 
 ### Success criteria
 
-The engine must enable consumers to answer those three questions confidently. It delivers:
+The first release delivers canonical settlement output consumers can query and export. Fee and gross-to-net questions resolve from normalized settlement lines; joins to payment records and bank entries ship in P1.
 
-- **One path across publishers**: The same ingest-to-export workflow for every report type and delivery channel.
-- **Standardized reconciliation**: One canonical settlement schema and one exception taxonomy, regardless of publisher layout.
-- **Proactive delivery tracking**: Expected files registered per publisher and window; alerts when artifacts are missing, late, or corrupt.
-- **Resilient ingest**: Invalid rows quarantined; valid rows in the same file still processed.
-- **Durable history**: Raw reports and normalized rows retained so reprocessing and audit do not depend on publisher republication.
-- **Reliable joins**: Settlement lines matched to payment records and bank movements; ambiguous or unmatched lines routed to review — not silently attached.
-- **Configurable extension**: New publishers, report types, and formats onboarded through configuration; export layout and schedule controlled by consumers without forking core logic.
-- **Consumer-ready output**: Normalized rows, match outcomes, exceptions, and lineage available through query and export APIs.
+- **Unified pipeline**: One ingest-to-export path for every publisher, channel, and report type.
+- **Canonical reconciliation model**: One settlement schema and one exception taxonomy regardless of publisher layout.
+- **Delivery visibility**: Missing, late, or corrupt files surface before finance finds them manually.
+- **Partial-failure tolerance**: Invalid rows quarantined; valid rows in the same file still commit.
+- **Auditable history**: Raw artifacts and normalized rows retained in the engine; amendments replay without depending on publisher republication.
+- **Consumer-shaped output**: Query and export over canonical fields; layout, grouping, and format chosen by the consumer.
 
 ## P0 Features
 
-These map directly to the success criteria above. Together they are the minimum output consumers need to answer the three questions without spreadsheets. Without them, the engine does not replace the [fragmented pipelines](/blogs/settlement-report-processing-engine-1/).
+These capabilities implement the success criteria. Without them, the engine does not replace the fragmented pipelines.
 
-- **Multi-channel ingestion**: Ingest from SFTP, email, API, and publisher portal; register expected delivery per publisher, report type, and settlement window; alert on missing, late, or corrupt files.
-- **Credential management**: Centralize SFTP keys, API tokens, and mailbox credentials; support rotation and per-environment isolation.
-- **Publisher onboarding**: Configure publisher, report type, channel, and schedule declaratively — no bespoke pipeline per integration.
-- **Configuration-driven formats**: Map CSV, fixed-width, XML, and JSON layouts into one canonical model through versioned definitions.
-- **Amount normalization**: Align per-publisher signs, line categories, gross/net/fee/tax semantics, and transaction vs settlement currency to one convention.
-- **Partial failure handling**: Validate row by row; quarantine failures with reason; commit valid rows so one bad line does not block the file.
-- **Report scope and correlation**: Group files by payout batch, MID, currency, and legal entity into settlement windows before matching.
-- **Identifier matching**: Join through an external id map — orchestrator ids, PSP references, auth codes, network RRN — and route ambiguous matches to review.
-- **Versioning and amendments**: Ingest idempotently; retain superseded artifacts; re-run downstream stages when adjustment journal lines arrive.
-- **Three-way reconciliation**: Match settlement lines to payment records and bank statement entries; surface gross-to-net deltas fee and reserve lines should explain.
-- **Exception management**: Classify unmatched and mismatched lines by reason code; persist match status and exception metadata; expose for downstream triage.
-- **Persistence and query**: Retain raw and normalized data for the publisher retention window; query by merchant scope, window, match status, and exception reason.
-- **Consumer APIs and exports**: Query, matching control, webhooks, and configurable batch output — column layout, grouping, format, and schedule.
-- **Volume at scale**: Stream or chunk large files; scope commits to batch and window; support idempotent replay across concurrent T+1 deliveries.
-- **Observability and audit**: Ingest lag, match rate, exception volume, and quarantine rate visible to operators; every row traceable to source artifact, mapping version, and processing run.
+- **Multi-channel ingestion**: Fetch from SFTP, email, API, and publisher portal; register expected delivery per publisher, report type, and settlement window.
+- **Credential management**: Centralize SFTP keys, API tokens, and mailbox credentials; rotation and per-environment isolation.
+- **Publisher onboarding**: Declarative configuration for publisher, report type, channel, and schedule — no bespoke pipeline per integration.
+- **Configuration-driven formats**: Versioned definitions map CSV, fixed-width, XML, and JSON into the canonical model.
+- **Amount normalization**: One sign convention and line-category semantics for gross, net, fee, tax, and transaction vs settlement currency.
+- **Partial failure handling**: Row-level validation; quarantine failures with reason; commit valid rows independently.
+- **Report scope and correlation**: Group files by payout batch, MID, currency, and legal entity into settlement windows.
+- **Versioning and amendments**: Idempotent ingest; retain superseded artifacts; re-run downstream stages on adjustment journal lines.
+- **Persistence and query**: Raw and normalized data in the engine per configured retention policy; query by merchant scope, window, line category, and quarantine reason.
+- **Consumer APIs and exports**: Query, webhooks, and scheduled or on-demand batch extract — column layout, grouping, and format.
+- **Volume at scale**: Stream or chunk large files; scope commits to batch and window; idempotent replay across concurrent T+1 deliveries.
+- **Observability and audit**: Ingest lag and quarantine rate for operators; row lineage to source artifact, mapping version, and processing run.
 
 ## P1 Features
 
-These accelerate rollout and day-to-day operations. They are not required for the first production reconciliation path.
+These follow the core ingest path. Matching and reconciliation need feeds the settlement report alone does not carry — internal payment records, bank statement entries, and a shared external id map; simulation and operator tooling reduce rollout risk once that path is stable.
 
+- **Identifier matching**: Join settlement lines to payment records through an external id map — orchestrator ids, PSP references, auth codes, network RRN; ambiguous matches to review.
+- **Three-way reconciliation**: Match settlement lines to payment records and bank statement entries; gross-to-net residuals that fee and reserve lines should explain.
+- **Exception management**: Reason-coded classification for unmatched and mismatched lines; persisted match status and exception metadata for triage.
+- **Matching control**: Start or monitor match runs, record operator decisions, and surface match rate and exception volume through the consumer API.
 - **Settlement file simulation**: Test ingest and reconciliation against publisher-shaped fixtures before live files arrive.
 - **AI-assisted operations**: Surface ingest health, mapping review, and quarantine triage in operator tooling — less spreadsheet work, same audit controls.
