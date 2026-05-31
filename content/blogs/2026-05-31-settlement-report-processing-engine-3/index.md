@@ -18,7 +18,7 @@ The **settlement report processing engine** (**engine**) sits between publishers
 
 - **Publisher**: Upstream partner that delivers settlement or reconciliation artifacts — card PSP, acquirer, wallet operator, bank, or LPM partner.
 - **Engine**: The standalone subsystem this post designs — ingest, normalization, ledger, reconciliation, and outbound APIs. It may run inside a wider payment platform but is not itself a platform others operate on.
-- **Consumer**: Downstream reader of normalized settlement data — automated reconciliation and finance jobs, internal data pipelines, and human-facing surfaces (operations consoles, merchant dashboards, partner PSP exports).
+- **Consumer**: Downstream reader of normalized settlement data — finance reconciliation jobs and internal data pipelines.
 
 ```text
 Publisher  →  Engine  →  Consumer
@@ -64,11 +64,11 @@ New publishers add mapping configuration from their report layout to this model;
 
 ### Correlation and reconciliation
 
-After ingest, the engine assembles ledger lines into settlement windows and runs matching before consumers treat a window as closed.
+After ingest, the engine assembles ledger lines into settlement windows and runs matching. Consumers drive close and approval in their own workflows from the match results the engine publishes.
 
 - **Correlation**: Group normalized lines and source files by merchant scope, currency, legal entity, payout batch, and settlement window. Allow multiple files per window; complete or explicitly waive the batch before matching starts.
 - **Matching**: Join ledger lines to internal payment records through the external id map; send ambiguous pairs to review instead of silent attachment.
-- **Three-way reconciliation**: Compare matched settlement totals to bank movements; classify residuals with a stable reason taxonomy; use match rate and exception volume to drive finance close.
+- **Three-way reconciliation**: Compare matched settlement totals to bank movements; classify residuals with a stable reason taxonomy; publish match rate and exception volume for downstream consumers.
 
 ### Settlement ledger
 
@@ -80,11 +80,11 @@ The ledger is the append-only store of normalized settlement facts after ingest.
 
 ### Consumer APIs and webhooks
 
-The **engine** exposes normalized settlement data to **consumers** — automated reconciliation and finance jobs, internal data pipelines, and human-facing surfaces (operations consoles, merchant dashboards, partner PSP exports) — not back to the **publisher** unless you operate a separate partner export product.
+The **engine** exposes normalized settlement data to **consumers** — finance reconciliation jobs and internal data pipelines — not back to the **publisher** unless you operate a separate partner export product.
 
 - **Query API**: Read settlement lines and payout batches by window, merchant scope, currency, and match status, with enough lineage for support and audit.
-- **Reconciliation API**: Start or monitor three-way match for a window; surface exceptions with a stable reason taxonomy; record manual resolutions with actor and time.
-- **Webhooks**: Push lifecycle signals when ingest finishes, when a window has the files reconciliation needs (or an explicit waiver), and when reconciliation reaches a close outcome — summaries only, not full file payloads.
+- **Matching API**: Start or monitor a three-way match run for a settlement window; surface exceptions with a stable reason taxonomy; record operator match decisions (override, waive, reassign reason) with actor and time. This controls engine matching state — not finance close scheduling or approval.
+- **Webhooks**: Push lifecycle signals when ingest finishes, when a window has the files matching requires (or an explicit waiver), and when a match run completes — summaries only, not full file payloads.
 - **Configurable export**: Offer scheduled or on-demand batch extracts for consumers that prefer files over APIs, using the same canonical model as the ledger.
 
 ### Operations
